@@ -697,6 +697,9 @@ canvas { display: block; max-width: 100%; }
   box-shadow: 0 4px 12px rgba(124,95,255,0.25);
 }
 
+/* hidden-атрибут ДОЛЖЕН скрывать элемент, даже если ниже задан display:flex */
+[hidden] { display: none !important; }
+
 /* ───────── screens (auth / onboarding) ───────── */
 .screen {
   position: fixed; inset: 0;
