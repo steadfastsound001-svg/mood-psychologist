@@ -7,6 +7,22 @@ const haptic = (k = "light") => { try { tg?.HapticFeedback?.impactOccurred(k); }
 const hapticOk = () => { try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (_) {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* count-up: плавно гонит число от текущего к target */
+function animateNum(el, target, dur = 900) {
+  if (!el) return;
+  const from = parseInt(el.textContent, 10);
+  const start = isNaN(from) ? 0 : from;
+  if (start === target) { el.textContent = target; return; }
+  const t0 = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const step = (now) => {
+    const p = Math.min(1, (now - t0) / dur);
+    el.textContent = Math.round(start + (target - start) * ease(p));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 const TOKEN_KEY = "mood_token";
 const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
 const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
@@ -208,6 +224,8 @@ function initApp() {
     setupChat();
     $("profSave").onclick = saveProfileInfo;
     $("profCompile").onclick = compilePortrait;
+    $("profExport").onclick = exportPortrait;
+    $("weeklyBtn").onclick = genWeekly;
     $("logoutBtn").onclick = () => { clearToken(); location.reload(); };
     $("fileBtn").onclick = () => $("fileInput").click();
     $("fileInput").onchange = (e) => uploadFiles(e.target.files);
@@ -239,6 +257,7 @@ function chatRender() {
     e.className = "chat-empty";
     e.textContent = "напиши что внутри — разберём вместе";
     box.appendChild(e);
+    maybeOpener();
     return;
   }
   for (const m of h) {
@@ -248,6 +267,26 @@ function chatRender() {
     box.appendChild(el);
   }
   box.scrollTop = box.scrollHeight;
+}
+
+/* проактивное приветствие: психолог сам начинает разговор (раз в день) */
+let openerTried = false;
+async function maybeOpener() {
+  if (openerTried || streaming) return;
+  openerTried = true;
+  const key = "mood_opener_" + (window.__me?.id || "x");
+  const today = new Date().toISOString().slice(0, 10);
+  if (localStorage.getItem(key) === today) return;
+  try {
+    const r = await api("/api/v2/opener");
+    const text = (r.text || "").trim();
+    if (!text) return;
+    if (loadChat().length) return; // юзер уже написал, пока грузилось
+    localStorage.setItem(key, today);
+    const h = [{ role: "agent", text }];
+    saveChat(h);
+    chatRender();
+  } catch (_) {}
 }
 
 function setupChat() {
@@ -284,13 +323,33 @@ async function sendMessage() {
     saveChat(f);
   };
   try {
-    const r = await api("/api/v2/chat", { method: "POST", body: { q: text } });
-    const full = (r.reply || "(пусто)").trim();
-    const toks = full.split(/(\s+)/);
-    for (const t of toks) { acc += t; agentEl.innerHTML = mdLite(acc); box.scrollTop = box.scrollHeight; await sleep(20); }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    const res = await fetch("/api/v2/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + getToken() },
+      body: JSON.stringify({ q: text }),
+      cache: "no-store",
+      signal: ctrl.signal,
+    });
+    if (!res.ok || !res.body) {
+      let msg = "HTTP " + res.status;
+      try { const j = await res.json(); msg = j.error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const { value, done: rdone } = await reader.read();
+      if (rdone) break;
+      acc += dec.decode(value, { stream: true });
+      agentEl.innerHTML = mdLite(acc);
+      box.scrollTop = box.scrollHeight;
+    }
+    clearTimeout(timer);
     done();
   } catch (e) {
-    acc = "сломалось: " + e.message;
+    if (!acc) acc = "сломалось: " + e.message;
     agentEl.innerHTML = mdLite(acc);
     done();
   }
@@ -311,7 +370,9 @@ async function loadProfile() {
     $("profCompiled").textContent = "—";
   }
   // кнопка «собрать портрет» исчезает после сборки
+  window.__portraitText = compiled.trim();
   $("profCompile").hidden = !!compiled.trim();
+  $("profExport").hidden = !compiled.trim();
   loadStats();
   loadDocuments();
 }
@@ -321,9 +382,48 @@ async function loadStats() {
     lastStats = await api("/api/stats");
   } catch (_) { lastStats = null; }
   renderMood(lastStats);
+  renderPulse(lastStats);
   renderTests(lastStats);
   renderAch(lastStats);
   renderAnalytics(lastStats);
+  // итоги недели открываются после 3 сеансов
+  if ($("weeklyCard")) $("weeklyCard").hidden = !(lastStats && lastStats.sessions >= 3);
+}
+
+/* ── пульс настроения ── */
+const PULSE = [
+  { e: "😞", l: "тяжело" },
+  { e: "😕", l: "так себе" },
+  { e: "😐", l: "норм" },
+  { e: "🙂", l: "хорошо" },
+  { e: "😄", l: "отлично" },
+];
+const PULSE_SCORES = [12, 32, 55, 78, 95]; // зеркало server.py
+function renderPulse(s) {
+  const row = $("pulseRow"), note = $("pulseNote");
+  if (!row) return;
+  row.innerHTML = "";
+  // mood_today хранится в MOOD-шкале → маппим обратно в индекс 1..5
+  const raw = s && s.mood_today;
+  const today = raw != null ? PULSE_SCORES.indexOf(raw) + 1 : 0;
+  PULSE.forEach((p, i) => {
+    const n = i + 1;
+    const b = document.createElement("button");
+    b.className = "pulse-btn" + (today === n ? " sel" : "");
+    b.innerHTML = `<span class="pulse-e">${p.e}</span><span class="pulse-l">${p.l}</span>`;
+    b.onclick = () => doPulse(n);
+    row.appendChild(b);
+  });
+  if (note) note.textContent = today ? "отмечено сегодня — можно поменять" : "отметь настроение — это рисует твою динамику";
+}
+async function doPulse(n) {
+  haptic("medium");
+  document.querySelectorAll("#pulseRow .pulse-btn").forEach((b, i) => b.classList.toggle("sel", i + 1 === n));
+  try {
+    const r = await api("/api/mood/checkin", { method: "POST", body: { score: n } });
+    if (r.stats) { lastStats = r.stats; renderPulse(r.stats); renderAnalytics(r.stats); }
+    hapticOk();
+  } catch (e) { console.warn("pulse:", e); }
 }
 
 const MOOD_WORD = (m) => m >= 75 ? "ты в ресурсе" : m >= 55 ? "в целом устойчиво" : m >= 40 ? "качает, но держишься" : "тяжёлый период";
@@ -341,8 +441,31 @@ function renderMood(s) {
   fill.style.strokeDasharray = C;
   fill.style.strokeDashoffset = C * (1 - m / 100);
   fill.style.stroke = m >= 65 ? "#30d158" : m >= 45 ? "#ffd60a" : "#ff9f0a";
-  $("moodNum").textContent = m;
+  animateNum($("moodNum"), m);
   $("moodCap").textContent = MOOD_WORD(m);
+}
+
+/* sparkline: SVG-полилиния по истории MOOD */
+function sparkline(hist) {
+  if (!hist || hist.length < 2) return "";
+  const vals = hist.map((h) => h.score);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  const W = 280, H = 56, pad = 4;
+  const n = vals.length;
+  const pts = vals.map((v, i) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad);
+    const y = H - pad - ((v - min) / span) * (H - 2 * pad);
+    return [x.toFixed(1), y.toFixed(1)];
+  });
+  const line = pts.map((p) => p.join(",")).join(" ");
+  const area = `${pad},${H - pad} ${line} ${W - pad},${H - pad}`;
+  const last = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <polyline class="spark-area" points="${area}"/>
+    <polyline class="spark-line" points="${line}"/>
+    <circle class="spark-dot" cx="${last[0]}" cy="${last[1]}" r="3.5"/>
+  </svg>`;
 }
 
 function renderTests(s) {
@@ -381,12 +504,14 @@ function renderAnalytics(s) {
     return;
   }
   const stat = (k, v) => `<div class="stat-tile"><div class="stat-v">${v}</div><div class="stat-k">${k}</div></div>`;
+  const streak = s.streak || 0;
+  const spark = sparkline(s.mood_history);
   box.innerHTML = `<div class="stat-grid">
     ${stat("сеансов", s.sessions)}
     ${stat("сообщений", s.user_msgs)}
-    ${stat("дней с нами", Math.floor(s.days_since_reg))}
+    ${stat("дней подряд", streak > 0 ? "🔥 " + streak : "—")}
     ${stat("MOOD", s.mood != null ? s.mood : "—")}
-  </div>`;
+  </div>${spark ? `<div class="spark-wrap"><div class="spark-cap">динамика MOOD</div>${spark}</div>` : ""}`;
 }
 
 function plural(n, a, b, c) {
@@ -403,7 +528,12 @@ async function compilePortrait() {
   $("profCompiling").hidden = false;
   try {
     const r = await api("/api/profile/compile", { method: "POST", body: {}, timeout: 90000 });
-    if (r.compiled) { $("profCompiled").innerHTML = mdLite(r.compiled); btn.hidden = true; }
+    if (r.compiled) {
+      $("profCompiled").innerHTML = mdLite(r.compiled);
+      window.__portraitText = r.compiled.trim();
+      btn.hidden = true;
+      $("profExport").hidden = false;
+    }
     hapticOk();
     loadStats();
   } catch (e) {
@@ -411,6 +541,83 @@ async function compilePortrait() {
   } finally {
     $("profCompiling").hidden = true;
     btn.disabled = false;
+  }
+}
+
+/* ── экспорт портрета в картинку (canvas → share/download) ── */
+function wrapText(ctx, text, maxW) {
+  const lines = [];
+  for (const para of (text || "").split("\n")) {
+    if (!para.trim()) { lines.push(""); continue; }
+    let line = "";
+    for (const word of para.split(/\s+/)) {
+      const test = line ? line + " " + word : word;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
+      else line = test;
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+async function exportPortrait() {
+  const text = (window.__portraitText || "").replace(/\*\*/g, "");
+  if (!text) return;
+  haptic("medium");
+  const W = 1080, pad = 90, fs = 34, lh = 50;
+  const dpr = 2;
+  const measure = document.createElement("canvas").getContext("2d");
+  measure.font = `${fs}px Inter, sans-serif`;
+  const lines = wrapText(measure, text, W - pad * 2);
+  const H = Math.max(1080, pad * 2 + 200 + lines.length * lh);
+  const cv = document.createElement("canvas");
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  // фон-градиент
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, "#0a0a14"); g.addColorStop(1, "#15102e");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // акцентное свечение
+  const glow = ctx.createRadialGradient(W * 0.8, 160, 0, W * 0.8, 160, 420);
+  glow.addColorStop(0, "rgba(124,95,255,0.35)"); glow.addColorStop(1, "rgba(124,95,255,0)");
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  // лого / заголовок
+  ctx.fillStyle = "#7c5fff"; ctx.font = "700 56px 'Space Grotesk', sans-serif";
+  ctx.fillText("◆ MOOD", pad, pad + 50);
+  ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "400 28px Inter, sans-serif";
+  ctx.fillText("твой психологический портрет", pad, pad + 95);
+  // текст
+  ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = `${fs}px Inter, sans-serif`;
+  let y = pad + 200;
+  for (const ln of lines) { ctx.fillText(ln, pad, y); y += lh; }
+  // подвал
+  ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "400 24px Inter, sans-serif";
+  ctx.fillText("mood — личный психолог в кармане", pad, H - pad + 20);
+
+  const blob = await new Promise((r) => cv.toBlob(r, "image/png"));
+  if (!blob) return;
+  const file = new File([blob], "mood-portrait.png", { type: "image/png" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "Мой портрет MOOD" }); hapticOk(); return; } catch (_) {}
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = "mood-portrait.png"; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  hapticOk();
+}
+
+/* ── итоги недели ── */
+async function genWeekly() {
+  const btn = $("weeklyBtn"), box = $("weeklyBox");
+  btn.disabled = true; btn.textContent = "собираю…";
+  try {
+    const r = await api("/api/v2/weekly", { method: "POST", body: {}, timeout: 90000 });
+    box.innerHTML = r.text ? mdLite(r.text) : "пока мало разговоров для итогов — возвращайся через пару сеансов";
+    hapticOk();
+  } catch (e) {
+    box.textContent = "не удалось: " + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "собрать итоги недели";
   }
 }
 

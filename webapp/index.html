@@ -30,7 +30,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=22">
+<link rel="stylesheet" href="/style.css?v=23">
 </head>
 <body>
 
@@ -117,11 +117,19 @@
       </div>
     </section>
 
+    <!-- пульс настроения -->
+    <section class="card pulse-card" id="pulseCard">
+      <h3>как ты сейчас?</h3>
+      <div class="card-note" id="pulseNote">отметь настроение — это рисует твою динамику</div>
+      <div class="pulse-row" id="pulseRow"></div>
+    </section>
+
     <!-- портрет -->
     <section class="card">
       <h3>твой портрет</h3>
       <div id="profCompiled" class="prof-compiled">портрет ещё не собран</div>
       <button class="btn-primary" id="profCompile" style="margin-top:14px">собрать портрет</button>
+      <button class="btn-ghost full" id="profExport" style="margin-top:10px" hidden>поделиться портретом</button>
       <div class="prof-saved" id="profCompiling" hidden>собираю…</div>
     </section>
 
@@ -142,6 +150,14 @@
     <section class="card">
       <h3>аналитика</h3>
       <div id="analyticsBox"></div>
+    </section>
+
+    <!-- итоги недели -->
+    <section class="card" id="weeklyCard" hidden>
+      <h3>итоги недели</h3>
+      <div class="card-note">психолог подводит черту по твоим разговорам</div>
+      <div id="weeklyBox" class="weekly-box"></div>
+      <button class="btn-ghost full" id="weeklyBtn" style="margin-top:10px">собрать итоги недели</button>
     </section>
 
     <!-- досье -->
@@ -208,6 +224,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=22"></script>
+<script src="/app.js?v=23"></script>
 </body>
 </html>

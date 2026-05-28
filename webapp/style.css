@@ -1049,3 +1049,40 @@ body.has-cursor .cursor-dot, body.has-cursor .cursor-ring {
 button:focus:not(:focus-visible),
 a:focus:not(:focus-visible),
 .field:focus:not(:focus-visible) { outline: none; }
+
+/* ═══════════ v23: пульс, динамика, итоги ═══════════ */
+
+/* пульс настроения */
+.pulse-row { display: flex; gap: 8px; margin-top: 12px; }
+.pulse-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 12px 4px; border-radius: 16px; cursor: pointer;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+  transition: transform 0.18s cubic-bezier(0.4,0,0.2,1), background 0.18s, border-color 0.18s;
+}
+.pulse-btn:hover { background: rgba(255,255,255,0.07); }
+.pulse-btn:active { transform: scale(0.93); }
+.pulse-btn.sel {
+  background: var(--grad-spectrum-soft);
+  border-color: rgba(124,95,255,0.5);
+  transform: translateY(-2px);
+}
+.pulse-e { font-size: 26px; line-height: 1; filter: saturate(1.1); }
+.pulse-l { font-size: 11px; color: var(--hint); }
+.pulse-btn.sel .pulse-l { color: var(--text); }
+
+/* sparkline динамики MOOD */
+.spark-wrap { margin-top: 16px; }
+.spark-cap { font-size: var(--t-footnote); color: var(--hint); margin-bottom: 6px; }
+.spark { width: 100%; height: 56px; display: block; }
+.spark-line { fill: none; stroke: #7c5fff; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round;
+  filter: drop-shadow(0 1px 6px rgba(124,95,255,0.5)); }
+.spark-area { fill: rgba(124,95,255,0.12); stroke: none; }
+.spark-dot { fill: #7c5fff; filter: drop-shadow(0 0 5px rgba(124,95,255,0.9)); }
+
+/* итоги недели */
+.weekly-box {
+  font-size: var(--t-body); line-height: 1.62; color: var(--text);
+  white-space: pre-wrap; margin-top: 4px; min-height: 8px;
+}
+.weekly-box:empty::before { content: "нажми кнопку — психолог соберёт картину недели"; color: var(--hint); }

@@ -118,6 +118,9 @@ _SCHEMA = [
     """CREATE TABLE IF NOT EXISTS documents(
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
       name TEXT NOT NULL, content TEXT NOT NULL, size INTEGER DEFAULT 0, ts REAL)""",
+    """CREATE TABLE IF NOT EXISTS mood_logs(
+      user_id INTEGER NOT NULL, day INTEGER NOT NULL, score INTEGER NOT NULL,
+      source TEXT DEFAULT 'pulse', ts REAL, PRIMARY KEY(user_id, day))""",
 ]
 
 
@@ -271,6 +274,48 @@ def documents_text(user_id: int, cap: int = 60000) -> str:
     return "\n\n".join(out)
 
 
+# ───────────── mood-логи (ежедневный пульс / снимки) ─────────────
+
+def log_mood(user_id: int, score: int, source: str = "pulse") -> None:
+    """Один снимок настроения на календарный день (upsert)."""
+    day = int(time.time() // 86400)
+    score = max(0, min(100, int(score)))
+    execute(
+        "INSERT INTO mood_logs(user_id, day, score, source, ts) VALUES(?,?,?,?,?) "
+        "ON CONFLICT(user_id, day) DO UPDATE SET score=excluded.score, source=excluded.source, ts=excluded.ts",
+        (user_id, day, score, source, time.time()),
+    )
+
+
+def mood_history(user_id: int, limit: int = 30) -> list[dict]:
+    rows = query(
+        "SELECT day, score FROM mood_logs WHERE user_id=? ORDER BY day DESC LIMIT ?",
+        (user_id, limit),
+    )
+    return list(reversed(rows))
+
+
+def mood_today(user_id: int) -> int | None:
+    day = int(time.time() // 86400)
+    rows = query("SELECT score FROM mood_logs WHERE user_id=? AND day=?", (user_id, day))
+    return int(rows[0]["score"]) if rows else None
+
+
+def _streak_from_days(days: set[int]) -> int:
+    """Сколько календарных дней подряд активности, заканчивая сегодня или вчера."""
+    if not days:
+        return 0
+    today = int(time.time() // 86400)
+    if today not in days and (today - 1) not in days:
+        return 0
+    cur = today if today in days else today - 1
+    n = 0
+    while cur in days:
+        n += 1
+        cur -= 1
+    return n
+
+
 # ───────────── stats (сеансы / возраст аккаунта) ─────────────
 
 def chat_stats(user_id: int) -> dict:
@@ -279,9 +324,14 @@ def chat_stats(user_id: int) -> dict:
     urow = query("SELECT created_at FROM users WHERE id=?", (user_id,))
     created = urow[0].get("created_at") if urow else None
     now = time.time()
-    sessions = len({int(t // 86400) for t in ts})  # сеанс = календарный день с сообщением
+    msg_days = {int(t // 86400) for t in ts}
+    sessions = len(msg_days)  # сеанс = календарный день с сообщением
+    # активные дни для стрика = дни с сообщением ИЛИ с отметкой пульса
+    pulse_rows = query("SELECT day FROM mood_logs WHERE user_id=?", (user_id,))
+    active_days = msg_days | {int(r["day"]) for r in pulse_rows if r.get("day") is not None}
     days_since_reg = ((now - created) / 86400) if created else 0
-    return {"user_msgs": len(ts), "sessions": sessions, "days_since_reg": days_since_reg}
+    return {"user_msgs": len(ts), "sessions": sessions,
+            "days_since_reg": days_since_reg, "streak": _streak_from_days(active_days)}
 
 
 # ───────────── messages ─────────────

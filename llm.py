@@ -181,9 +181,83 @@ class Anthropic:
         self.messages = _Messages()
 
 
-# ───────────── async streaming (SSE) ─────────────
+# ───────────── sync streaming (SSE) — для ThreadingHTTPServer ─────────────
 
 import json as _json
+
+
+def stream_completion_sync(
+    *,
+    system: Any = None,
+    messages: list[dict] | None = None,
+    max_tokens: int = 220,
+    model: str | None = None,
+    task: str | None = None,
+):
+    """Синхронный генератор текстовых дельт от OpenRouter (SSE), с fallback по моделям."""
+    if task:
+        preferred = _model_for_task(task)
+        if preferred:
+            model = preferred
+    sys_text = _flatten_system(system)
+    chat = []
+    if sys_text:
+        chat.append({"role": "system", "content": sys_text})
+    for m in messages or []:
+        chat.append({"role": m.get("role", "user"), "content": _flatten_content(m.get("content", ""))})
+
+    fb = _fallback_models()
+    models = [model] if model and model not in fb else []
+    for m in fb:
+        if m not in models:
+            models.append(m)
+    models = [m for m in models if not (m and m.startswith("claude-"))]
+
+    key = _api_key()
+    if not key:
+        raise RuntimeError("OPENROUTER_API_KEY не задан в .env")
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://t.me/personal-psychologist",
+        "X-Title": "Psychologist Bot",
+        "Accept": "text/event-stream",
+    }
+    url = f"{_base_url()}/chat/completions"
+    last_err: Exception | None = None
+    for m in models:
+        body = {"model": m, "messages": chat, "max_tokens": max_tokens, "stream": True}
+        got_any = False
+        try:
+            with httpx.Client(timeout=180) as cli:
+                with cli.stream("POST", url, json=body, headers=headers) as r:
+                    if r.status_code >= 400:
+                        last_err = RuntimeError(f"openrouter {r.status_code}")
+                        continue
+                    for raw in r.iter_lines():
+                        if not raw or raw.startswith(":") or not raw.startswith("data:"):
+                            continue
+                        payload = raw[5:].strip()
+                        if payload == "[DONE]":
+                            return
+                        try:
+                            obj = _json.loads(payload)
+                            delta = obj["choices"][0].get("delta", {}).get("content")
+                        except Exception:
+                            delta = None
+                        if delta:
+                            got_any = True
+                            yield delta
+                    if got_any:
+                        return
+        except Exception as e:
+            last_err = e
+            continue
+    if last_err:
+        raise RuntimeError(f"стрим: все модели не ответили: {last_err}")
+
+
+# ───────────── async streaming (SSE) ─────────────
 
 
 async def stream_completion(

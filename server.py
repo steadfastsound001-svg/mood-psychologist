@@ -18,10 +18,10 @@ load_dotenv(ROOT / ".env", override=True)
 
 import store
 import onboarding
-from llm import Anthropic
+from llm import Anthropic, stream_completion_sync
 from agent_core import user_system
 
-client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+client = Anthropic()  # для нестримовых вызовов (weekly/opener)
 
 PORT = int(os.environ.get("PORT", "8080"))
 WEBAPP_DIR = ROOT / "webapp"
@@ -30,6 +30,7 @@ MOOD_MIN_SESSIONS = 10      # MOOD-оценка открывается посл�
 ANALYTICS_MIN_DAYS = 10     # аналитика открывается после N дней
 DOC_MAX_BYTES = 1_000_000   # лимит на один файл
 DOC_TOTAL_BYTES = 5_000_000 # суммарный лимит досье
+PULSE_SCORES = [12, 32, 55, 78, 95]  # пульс 1..5 → MOOD-шкала 0-100
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip("/")
@@ -104,6 +105,7 @@ class Handler(BaseHTTPRequestHandler):
         st = store.chat_stats(uid)
         sessions = st["sessions"]
         days = st["days_since_reg"]
+        streak = st.get("streak", 0)
         mood = onboarding.compute_mood(answers, extra) if sessions >= MOOD_MIN_SESSIONS else None
         portrait_done = bool((prof.get("compiled") or "").strip())
         tests_done = {t["id"]: (t["id"] in extra) for t in onboarding.EXTRA_TESTS}
@@ -112,15 +114,91 @@ class Handler(BaseHTTPRequestHandler):
             a = t["achievement"]
             ach.append({"id": t["id"], "icon": a["icon"], "label": a["label"], "got": t["id"] in extra})
         ach.append({"id": "portrait", "icon": "🎨", "label": "портрет собран", "got": portrait_done})
+        ach.append({"id": "streak7", "icon": "🔥", "label": "7 дней подряд", "got": streak >= 7})
         ach.append({"id": "sessions10", "icon": "💬", "label": "10 сеансов", "got": sessions >= MOOD_MIN_SESSIONS})
         return {
             "sessions": sessions, "user_msgs": st["user_msgs"], "days_since_reg": round(days, 1),
+            "streak": streak,
             "mood": mood, "mood_remaining": max(0, MOOD_MIN_SESSIONS - sessions),
+            "mood_today": store.mood_today(uid),
+            "mood_history": store.mood_history(uid, 30),
             "tests": tests_done, "portrait": portrait_done,
             "analytics_unlocked": days >= ANALYTICS_MIN_DAYS,
             "analytics_in_days": max(0, round(ANALYTICS_MIN_DAYS - days, 1)),
             "achievements": ach,
         }
+
+    def _chat_stream(self, uid, text):
+        """Стримит ответ психолога чанками (text/plain), затем сохраняет диалог."""
+        prof = store.get_profile(uid)
+        messages = store.recent_messages(uid, 20) + [{"role": "user", "content": text}]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        acc = []
+        try:
+            for delta in stream_completion_sync(
+                system=user_system(prof.get("compiled", "")),
+                messages=messages, max_tokens=220, task="dialog",
+            ):
+                acc.append(delta)
+                try:
+                    self.wfile.write(delta.encode("utf-8")); self.wfile.flush()
+                except Exception:
+                    break
+        except Exception as e:
+            try:
+                self.wfile.write(f"\n[сломалось: {e}]".encode("utf-8"))
+            except Exception:
+                pass
+        reply = "".join(acc).strip()
+        if reply:
+            store.add_message(uid, "user", text)
+            store.add_message(uid, "assistant", reply)
+
+    def _opener(self, uid):
+        """Короткая личная фраза для пустого чата: по профилю + паузе с прошлого раза."""
+        prof = store.get_profile(uid)
+        msgs = store.recent_messages(uid, 1)
+        compiled = (prof.get("compiled") or "").strip()
+        if not msgs:
+            hint = "это первый разговор. поздоровайся коротко, по-человечески, и задай один открытый вопрос про то, что привело."
+        else:
+            hint = "вы уже общались. открой разговор живой личной фразой и одним точным вопросом — без «чем могу помочь»."
+        sys = user_system(compiled)
+        try:
+            resp = client.messages.create(
+                system=sys,
+                messages=[{"role": "user", "content": f"[служебное: сгенерируй ТОЛЬКО первую реплику-открытие, 1 строка. {hint}]"}],
+                max_tokens=80, task="dialog",
+            )
+            return resp.content[0].text.strip()
+        except Exception:
+            return "с чего начнём сегодня?"
+
+    def _weekly(self, uid):
+        """Рефлексия психолога за последние 7 дней по сообщениям клиента."""
+        import time as _t
+        cutoff = _t.time() - 7 * 86400
+        rows = store.recent_messages(uid, 120)
+        user_texts = [m["content"] for m in rows if m.get("role") == "user"]
+        if len(user_texts) < 3:
+            return ""
+        blob = "\n".join(f"— {t}" for t in user_texts[-40:])
+        sys = ("ты психолог. на входе — реплики клиента за неделю. напиши короткие тёплые итоги недели "
+               "(3-5 строк, на «ты», строчные, без воды и без markdown кроме **жирного**): что было в фокусе, "
+               "какой сдвиг заметен, один мягкий ориентир на следующую неделю. только из реплик, не выдумывай.")
+        try:
+            resp = client.messages.create(
+                system=sys, messages=[{"role": "user", "content": blob}],
+                max_tokens=400, task="reasoning",
+            )
+            return resp.content[0].text.strip()
+        except Exception as e:
+            return f"не удалось собрать: {e}"
 
     # ── GET ──
     def do_GET(self):
@@ -157,6 +235,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"documents": store.list_documents(user["id"]),
                              "total": store.documents_total(user["id"]),
                              "limit": DOC_TOTAL_BYTES}); return
+        if p == "/api/v2/opener":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            self._json(200, {"text": self._opener(user["id"])}); return
         # статика
         rel = p.lstrip("/") or "index.html"
         target = (WEBAPP_DIR / rel).resolve()
@@ -283,16 +366,19 @@ class Handler(BaseHTTPRequestHandler):
                 text = (body.get("q") or "").strip()
                 if not text:
                     self._json(400, {"error": "empty"}); return
-                prof = store.get_profile(uid)
-                messages = store.recent_messages(uid, 20) + [{"role": "user", "content": text}]
-                resp = client.messages.create(
-                    system=user_system(prof.get("compiled", "")),
-                    messages=messages, max_tokens=220, task="dialog",
-                )
-                reply = resp.content[0].text
-                store.add_message(uid, "user", text)
-                store.add_message(uid, "assistant", reply)
-                self._json(200, {"reply": reply}); return
+                self._chat_stream(uid, text); return
+
+            if u.path == "/api/mood/checkin":
+                try:
+                    n = int(body.get("score"))
+                except Exception:
+                    self._json(400, {"error": "bad score"}); return
+                n = max(1, min(5, n))
+                store.log_mood(uid, PULSE_SCORES[n - 1], "pulse")
+                self._json(200, {"ok": True, "stats": self._build_stats(uid)}); return
+
+            if u.path == "/api/v2/weekly":
+                self._json(200, {"text": self._weekly(uid)}); return
 
             self._json(404, {"error": "not found"})
         except Exception as e:
