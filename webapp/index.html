@@ -17,9 +17,16 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="apple-touch-startup-image" href="/icon-1024.png">
 
-<link rel="stylesheet" href="/style.css?v=19">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/style.css?v=20">
 </head>
 <body>
+
+<!-- кастомный курсор (только desktop) -->
+<div id="cursorRing" class="cursor-ring"></div>
+<div id="cursorDot" class="cursor-dot"></div>
 
 <!-- ───────── AUTH ───────── -->
 <div id="authScreen" class="screen" hidden>
@@ -78,30 +85,78 @@
     </div>
   </div>
 
-  <!-- PROFILE view -->
+  <!-- MOOD view -->
   <div id="profileView" class="profile-view" hidden>
     <div class="page-header">
-      <div class="page-title">ПРОФИЛЬ</div>
+      <div class="page-title">MOOD</div>
     </div>
+
+    <!-- MOOD score -->
+    <section class="card mood-card">
+      <div id="moodLocked" class="locked">
+        <div class="locked-ico">🔒</div>
+        <div class="locked-t">оценка MOOD</div>
+        <div class="locked-s" id="moodProg">откроется после 10 сеансов</div>
+      </div>
+      <div id="moodReady" hidden>
+        <div class="mood-ring" id="moodRing">
+          <svg viewBox="0 0 120 120"><circle class="mr-track" cx="60" cy="60" r="52"/><circle class="mr-fill" id="mrFill" cx="60" cy="60" r="52"/></svg>
+          <div class="mr-center"><span class="mr-num" id="moodNum">—</span><span class="mr-lbl">MOOD</span></div>
+        </div>
+        <div class="mood-cap" id="moodCap"></div>
+      </div>
+    </section>
+
+    <!-- портрет -->
+    <section class="card">
+      <h3>твой портрет</h3>
+      <div id="profCompiled" class="prof-compiled">портрет ещё не собран</div>
+      <button class="btn-primary" id="profCompile" style="margin-top:14px">собрать портрет</button>
+      <div class="prof-saved" id="profCompiling" hidden>собираю…</div>
+    </section>
+
+    <!-- тесты -->
+    <section class="card">
+      <h3>тесты о тебе</h3>
+      <div class="card-note">пройди, чтобы психолог узнал тебя со всех сторон</div>
+      <div id="testsList" class="tests-list"></div>
+    </section>
+
+    <!-- достижения -->
+    <section class="card">
+      <h3>достижения</h3>
+      <div id="achList" class="ach-grid"></div>
+    </section>
+
+    <!-- аналитика -->
+    <section class="card">
+      <h3>аналитика</h3>
+      <div id="analyticsBox"></div>
+    </section>
+
+    <!-- досье -->
+    <section class="card">
+      <h3>досье — загрузи о себе</h3>
+      <div class="card-note">тексты, переписки, заметки, история. до 1 МБ на файл, 5 МБ всего.</div>
+      <input type="file" id="fileInput" multiple accept=".txt,.md,.csv,.json,.html,.htm,.log,.rtf" hidden>
+      <button class="btn-ghost full" id="fileBtn" style="margin-top:12px">+ добавить файл</button>
+      <div id="fileList" class="file-list"></div>
+    </section>
+
+    <!-- добавить о себе -->
+    <section class="card">
+      <h3>добавить о себе</h3>
+      <textarea class="field area" id="profInfo" rows="4" placeholder="контекст, прошлое, отношения, цели…"></textarea>
+      <button class="btn-primary" id="profSave" style="margin-top:12px">сохранить и обновить портрет</button>
+      <div class="prof-saved" id="profSaved" hidden>обновил портрет ✓</div>
+    </section>
+
+    <!-- аккаунт -->
     <section class="card">
       <h3>аккаунт</h3>
       <div class="prof-row"><span class="prof-k">имя</span><span class="prof-v" id="profName">—</span></div>
       <div class="prof-row"><span class="prof-k">email</span><span class="prof-v" id="profEmail">—</span></div>
-    </section>
-    <section class="card">
-      <h3>портрет</h3>
-      <div id="profCompiled" class="prof-compiled">портрет ещё не собран</div>
-      <button class="btn-primary" id="profCompile" style="margin-top:12px">собрать портрет</button>
-      <div class="prof-saved" id="profCompiling" hidden>собираю…</div>
-    </section>
-    <section class="card">
-      <h3>добавить о себе</h3>
-      <textarea class="field area" id="profInfo" rows="5" placeholder="всё что важно: контекст, прошлое, отношения, цели…"></textarea>
-      <button class="btn-primary" id="profSave">сохранить и обновить портрет</button>
-      <div class="prof-saved" id="profSaved" hidden>обновил портрет ✓</div>
-    </section>
-    <section class="card">
-      <button class="btn-ghost full" id="logoutBtn">выйти</button>
+      <button class="btn-ghost full" id="logoutBtn" style="margin-top:14px">выйти</button>
     </section>
   </div>
 
@@ -111,10 +166,27 @@
       <span class="tab-label">CHAT</span>
     </button>
     <button class="tab-item" data-view="profile">
-      <span class="tab-icon">◐</span>
-      <span class="tab-label">ПРОФИЛЬ</span>
+      <span class="tab-icon">✦</span>
+      <span class="tab-label">MOOD</span>
     </button>
   </nav>
+</div>
+
+<!-- ───────── TEST MODAL ───────── -->
+<div id="testModal" class="test-modal" hidden>
+  <div class="test-sheet">
+    <div class="onboard-head">
+      <div class="onboard-progress"><div class="onboard-progress-fill" id="tmFill"></div></div>
+      <div class="onboard-step" id="tmStep"></div>
+    </div>
+    <div class="onboard-body">
+      <div class="onboard-q" id="tmQuestion"></div>
+      <div class="onboard-answer" id="tmAnswer"></div>
+    </div>
+    <div class="onboard-foot">
+      <button class="btn-ghost" id="tmClose">закрыть</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -123,6 +195,6 @@
     navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {});
   }
 </script>
-<script src="/app.js?v=19"></script>
+<script src="/app.js?v=20"></script>
 </body>
 </html>

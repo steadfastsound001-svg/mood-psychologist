@@ -115,12 +115,20 @@ _SCHEMA = [
     """CREATE TABLE IF NOT EXISTS messages(
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
       role TEXT NOT NULL, content TEXT NOT NULL, ts REAL)""",
+    """CREATE TABLE IF NOT EXISTS documents(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+      name TEXT NOT NULL, content TEXT NOT NULL, size INTEGER DEFAULT 0, ts REAL)""",
 ]
 
 
 def init_db() -> None:
     for stmt in _SCHEMA:
         execute(stmt)
+    # миграция: доп-тесты (JSON) в профиле. ADD COLUMN идемпотентно через try.
+    try:
+        execute("ALTER TABLE profiles ADD COLUMN extra_tests TEXT DEFAULT ''")
+    except Exception:
+        pass
 
 
 # ───────────── auth ─────────────
@@ -210,6 +218,70 @@ def save_test_answers(user_id: int, answers: dict) -> None:
 def set_compiled(user_id: int, compiled: str) -> None:
     execute("UPDATE profiles SET compiled=?, onboarded=1, updated_at=? WHERE user_id=?",
             (compiled, time.time(), user_id))
+
+
+def save_extra_tests(user_id: int, data: dict) -> None:
+    import json
+    execute("UPDATE profiles SET extra_tests=?, updated_at=? WHERE user_id=?",
+            (json.dumps(data, ensure_ascii=False), time.time(), user_id))
+
+
+def get_extra_tests(user_id: int) -> dict:
+    import json
+    rows = query("SELECT extra_tests FROM profiles WHERE user_id=?", (user_id,))
+    if not rows:
+        return {}
+    try:
+        return json.loads(rows[0].get("extra_tests") or "{}")
+    except Exception:
+        return {}
+
+
+# ───────────── documents (досье) ─────────────
+
+def add_document(user_id: int, name: str, content: str) -> int | None:
+    size = len(content.encode("utf-8"))
+    return execute("INSERT INTO documents(user_id, name, content, size, ts) VALUES(?,?,?,?,?)",
+                   (user_id, name, content, size, time.time()))
+
+
+def list_documents(user_id: int) -> list[dict]:
+    return query("SELECT id, name, size, ts FROM documents WHERE user_id=? ORDER BY id DESC", (user_id,))
+
+
+def delete_document(user_id: int, doc_id: int) -> None:
+    execute("DELETE FROM documents WHERE id=? AND user_id=?", (doc_id, user_id))
+
+
+def documents_total(user_id: int) -> int:
+    rows = query("SELECT COALESCE(SUM(size),0) AS s FROM documents WHERE user_id=?", (user_id,))
+    return int(rows[0]["s"]) if rows else 0
+
+
+def documents_text(user_id: int, cap: int = 60000) -> str:
+    rows = query("SELECT name, content FROM documents WHERE user_id=? ORDER BY id", (user_id,))
+    out, total = [], 0
+    for r in rows:
+        chunk = f"[файл: {r['name']}]\n{r['content']}"
+        if total + len(chunk) > cap:
+            out.append(chunk[: max(0, cap - total)])
+            break
+        out.append(chunk)
+        total += len(chunk)
+    return "\n\n".join(out)
+
+
+# ───────────── stats (сеансы / возраст аккаунта) ─────────────
+
+def chat_stats(user_id: int) -> dict:
+    rows = query("SELECT ts FROM messages WHERE user_id=? AND role='user'", (user_id,))
+    ts = sorted(r["ts"] for r in rows if r.get("ts"))
+    urow = query("SELECT created_at FROM users WHERE id=?", (user_id,))
+    created = urow[0].get("created_at") if urow else None
+    now = time.time()
+    sessions = len({int(t // 86400) for t in ts})  # сеанс = календарный день с сообщением
+    days_since_reg = ((now - created) / 86400) if created else 0
+    return {"user_msgs": len(ts), "sessions": sessions, "days_since_reg": days_since_reg}
 
 
 # ───────────── messages ─────────────

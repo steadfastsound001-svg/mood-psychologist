@@ -209,6 +209,10 @@ function initApp() {
     $("profSave").onclick = saveProfileInfo;
     $("profCompile").onclick = compilePortrait;
     $("logoutBtn").onclick = () => { clearToken(); location.reload(); };
+    $("fileBtn").onclick = () => $("fileInput").click();
+    $("fileInput").onchange = (e) => uploadFiles(e.target.files);
+    $("tmClose").onclick = closeTest;
+    loadExtraTests();
   }
   switchView("chat");
 }
@@ -292,16 +296,105 @@ async function sendMessage() {
   }
 }
 
-/* ── profile ── */
+/* ── profile / MOOD ── */
+let lastStats = null;
+
 async function loadProfile() {
   $("profName").textContent = window.__me?.name || "—";
   $("profEmail").textContent = window.__me?.email || "—";
+  let compiled = "";
   try {
     const me = await api("/api/me");
-    $("profCompiled").innerHTML = me.compiled ? mdLite(me.compiled) : "портрет ещё не собран — нажми кнопку ниже";
+    compiled = me.compiled || "";
+    $("profCompiled").innerHTML = compiled ? mdLite(compiled) : "портрет ещё не собран — нажми кнопку ниже";
   } catch (_) {
     $("profCompiled").textContent = "—";
   }
+  // кнопка «собрать портрет» исчезает после сборки
+  $("profCompile").hidden = !!compiled.trim();
+  loadStats();
+  loadDocuments();
+}
+
+async function loadStats() {
+  try {
+    lastStats = await api("/api/stats");
+  } catch (_) { lastStats = null; }
+  renderMood(lastStats);
+  renderTests(lastStats);
+  renderAch(lastStats);
+  renderAnalytics(lastStats);
+}
+
+const MOOD_WORD = (m) => m >= 75 ? "ты в ресурсе" : m >= 55 ? "в целом устойчиво" : m >= 40 ? "качает, но держишься" : "тяжёлый период";
+function renderMood(s) {
+  const locked = $("moodLocked"), ready = $("moodReady");
+  if (!s || s.mood == null) {
+    locked.hidden = false; ready.hidden = true;
+    if (s) $("moodProg").textContent = `осталось ${s.mood_remaining} ${plural(s.mood_remaining, "сеанс", "сеанса", "сеансов")}`;
+    return;
+  }
+  locked.hidden = true; ready.hidden = false;
+  const m = s.mood;
+  const C = 2 * Math.PI * 52;
+  const fill = $("mrFill");
+  fill.style.strokeDasharray = C;
+  fill.style.strokeDashoffset = C * (1 - m / 100);
+  fill.style.stroke = m >= 65 ? "#30d158" : m >= 45 ? "#ffd60a" : "#ff9f0a";
+  $("moodNum").textContent = m;
+  $("moodCap").textContent = MOOD_WORD(m);
+}
+
+function renderTests(s) {
+  const box = $("testsList");
+  box.innerHTML = "";
+  if (!extraTests.length) { box.textContent = "—"; return; }
+  extraTests.forEach((t) => {
+    const done = s && s.tests && s.tests[t.id];
+    const el = document.createElement("button");
+    el.className = "test-item" + (done ? " done" : "");
+    el.innerHTML = `<span class="test-emoji">${t.emoji}</span><span class="test-title">${t.title}</span><span class="test-state">${done ? "✓ пройден" : "пройти →"}</span>`;
+    el.onclick = () => { haptic(); openTest(t); };
+    box.appendChild(el);
+  });
+}
+
+function renderAch(s) {
+  const box = $("achList");
+  box.innerHTML = "";
+  const list = (s && s.achievements) || [];
+  list.forEach((a) => {
+    const el = document.createElement("div");
+    el.className = "ach" + (a.got ? " got" : "");
+    el.innerHTML = `<span class="ach-ico">${a.got ? a.icon : "🔒"}</span><span class="ach-lbl">${a.label}</span>`;
+    box.appendChild(el);
+  });
+}
+
+function renderAnalytics(s) {
+  const box = $("analyticsBox");
+  if (!s) { box.innerHTML = '<div class="card-note">—</div>'; return; }
+  if (!s.analytics_unlocked) {
+    box.innerHTML = `<div class="locked"><div class="locked-ico">🔒</div>
+      <div class="locked-t">графики и динамика</div>
+      <div class="locked-s">откроется через ${Math.ceil(s.analytics_in_days)} ${plural(Math.ceil(s.analytics_in_days), "день", "дня", "дней")} терапии</div></div>`;
+    return;
+  }
+  const stat = (k, v) => `<div class="stat-tile"><div class="stat-v">${v}</div><div class="stat-k">${k}</div></div>`;
+  box.innerHTML = `<div class="stat-grid">
+    ${stat("сеансов", s.sessions)}
+    ${stat("сообщений", s.user_msgs)}
+    ${stat("дней с нами", Math.floor(s.days_since_reg))}
+    ${stat("MOOD", s.mood != null ? s.mood : "—")}
+  </div>`;
+}
+
+function plural(n, a, b, c) {
+  n = Math.abs(n) % 100; const n1 = n % 10;
+  if (n > 10 && n < 20) return c;
+  if (n1 > 1 && n1 < 5) return b;
+  if (n1 === 1) return a;
+  return c;
 }
 
 async function compilePortrait() {
@@ -310,14 +403,101 @@ async function compilePortrait() {
   $("profCompiling").hidden = false;
   try {
     const r = await api("/api/profile/compile", { method: "POST", body: {}, timeout: 90000 });
-    if (r.compiled) $("profCompiled").innerHTML = mdLite(r.compiled);
+    if (r.compiled) { $("profCompiled").innerHTML = mdLite(r.compiled); btn.hidden = true; }
     hapticOk();
+    loadStats();
   } catch (e) {
     $("profCompiled").textContent = "не удалось собрать: " + e.message;
   } finally {
     $("profCompiling").hidden = true;
     btn.disabled = false;
   }
+}
+
+/* ── tests ── */
+let extraTests = [];
+let tmTest = null, tmIndex = 0, tmAnswers = {};
+
+async function loadExtraTests() {
+  try { const r = await api("/api/tests", { auth: false }); extraTests = r.tests || []; }
+  catch (_) { extraTests = []; }
+}
+
+function openTest(t) {
+  tmTest = t; tmIndex = 0; tmAnswers = {};
+  $("testModal").hidden = false;
+  renderTestQ();
+}
+function closeTest() { $("testModal").hidden = true; tmTest = null; }
+
+function renderTestQ() {
+  const t = tmTest; if (!t) return;
+  const q = t.questions[tmIndex];
+  $("tmFill").style.width = (tmIndex / t.questions.length * 100) + "%";
+  $("tmStep").textContent = `${t.emoji} ${t.title} · ${tmIndex + 1}/${t.questions.length}`;
+  $("tmQuestion").textContent = q.q;
+  const box = $("tmAnswer"); box.innerHTML = "";
+  const wrap = document.createElement("div"); wrap.className = "scale-wrap";
+  (t.labels || ["1","2","3","4","5"]).forEach((label, i) => {
+    const b = document.createElement("button");
+    b.className = "scale-btn" + (tmAnswers[q.id] === i + 1 ? " sel" : "");
+    b.innerHTML = `<span class="scale-num">${i + 1}</span><span class="scale-lbl">${label}</span>`;
+    b.onclick = () => { haptic(); tmAnswers[q.id] = i + 1; setTimeout(tmNext, 160); };
+    wrap.appendChild(b);
+  });
+  box.appendChild(wrap);
+}
+
+async function tmNext() {
+  if (tmIndex < tmTest.questions.length - 1) { tmIndex++; renderTestQ(); return; }
+  const tid = tmTest.id;
+  closeTest();
+  hapticOk();
+  try {
+    const r = await api("/api/tests/submit", { method: "POST", body: { test_id: tid, answers: tmAnswers } });
+    if (r.stats) { lastStats = r.stats; renderMood(r.stats); renderTests(r.stats); renderAch(r.stats); renderAnalytics(r.stats); }
+  } catch (e) { console.warn("test submit:", e); }
+}
+
+/* ── documents (досье) ── */
+async function loadDocuments() {
+  try { const r = await api("/api/documents"); renderDocs(r.documents || [], r.total || 0); }
+  catch (_) {}
+}
+function renderDocs(docs, total) {
+  const box = $("fileList"); box.innerHTML = "";
+  if (!docs.length) return;
+  const kb = (n) => n > 1024 * 1024 ? (n / 1048576).toFixed(1) + " МБ" : Math.max(1, Math.round(n / 1024)) + " КБ";
+  docs.forEach((d) => {
+    const el = document.createElement("div"); el.className = "file-row";
+    el.innerHTML = `<span class="file-name">📄 ${escapeHtml(d.name)}</span><span class="file-size">${kb(d.size)}</span><button class="file-del" data-id="${d.id}">✕</button>`;
+    el.querySelector(".file-del").onclick = () => deleteDoc(d.id);
+    box.appendChild(el);
+  });
+  const t = document.createElement("div"); t.className = "card-note"; t.style.marginTop = "8px";
+  t.textContent = `всего: ${kb(total)} / 5 МБ`;
+  box.appendChild(t);
+}
+function escapeHtml(s) { return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+async function uploadFiles(files) {
+  for (const f of files) {
+    if (f.size > 1024 * 1024) { alert(`${f.name}: больше 1 МБ, пропускаю`); continue; }
+    let text = "";
+    try { text = await f.text(); } catch (_) { continue; }
+    if (!text.trim()) continue;
+    try {
+      const r = await api("/api/documents", { method: "POST", body: { name: f.name, content: text } });
+      renderDocs(r.documents || [], r.total || 0);
+      hapticOk();
+    } catch (e) { alert("ошибка: " + e.message); break; }
+  }
+  $("fileInput").value = "";
+}
+
+async function deleteDoc(id) {
+  try { const r = await api("/api/documents/delete", { method: "POST", body: { id } }); renderDocs(r.documents || [], r.total || 0); haptic(); }
+  catch (e) { alert("ошибка: " + e.message); }
 }
 
 async function saveProfileInfo() {
@@ -336,6 +516,26 @@ async function saveProfileInfo() {
   }
 }
 
+/* ───────── кастомный курсор (desktop, fine pointer) ───────── */
+function initCursor() {
+  if (!window.matchMedia || !window.matchMedia("(pointer: fine)").matches) return;
+  const dot = $("cursorDot"), ring = $("cursorRing");
+  if (!dot || !ring) return;
+  document.body.classList.add("has-cursor");
+  let rx = 0, ry = 0, dx = 0, dy = 0;
+  document.addEventListener("mousemove", (e) => {
+    dx = e.clientX; dy = e.clientY;
+    dot.style.transform = `translate(${dx}px, ${dy}px)`;
+    const t = e.target.closest("button, a, .test-item, .scale-btn, .tab-item, .file-del, textarea, input");
+    ring.classList.toggle("hot", !!t);
+  });
+  const loop = () => { rx += (dx - rx) * 0.18; ry += (dy - ry) * 0.18; ring.style.transform = `translate(${rx}px, ${ry}px)`; requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+  document.addEventListener("mousedown", () => ring.classList.add("down"));
+  document.addEventListener("mouseup", () => ring.classList.remove("down"));
+}
+
+initCursor();
 boot().catch((e) => {
   try { initAuth(); show("authScreen"); } catch (_) {}
   const err = $("authError");

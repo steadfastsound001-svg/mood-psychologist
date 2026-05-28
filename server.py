@@ -27,6 +27,10 @@ client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 PORT = int(os.environ.get("PORT", "8080"))
 WEBAPP_DIR = ROOT / "webapp"
 DIALOG_LIMIT = 30
+MOOD_MIN_SESSIONS = 10      # MOOD-оценка открывается после N сеансов
+ANALYTICS_MIN_DAYS = 10     # аналитика открывается после N дней
+DOC_MAX_BYTES = 1_000_000   # лимит на один файл
+DOC_TOTAL_BYTES = 5_000_000 # суммарный лимит досье
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip("/")
@@ -91,6 +95,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _build_stats(self, uid):
+        prof = store.get_profile(uid)
+        extra = store.get_extra_tests(uid)
+        try:
+            answers = json.loads(prof.get("test_answers") or "{}")
+        except Exception:
+            answers = {}
+        st = store.chat_stats(uid)
+        sessions = st["sessions"]
+        days = st["days_since_reg"]
+        mood = onboarding.compute_mood(answers, extra) if sessions >= MOOD_MIN_SESSIONS else None
+        portrait_done = bool((prof.get("compiled") or "").strip())
+        tests_done = {t["id"]: (t["id"] in extra) for t in onboarding.EXTRA_TESTS}
+        ach = [{"id": "start", "icon": "🚀", "label": "старт", "got": bool(prof.get("onboarded"))}]
+        for t in onboarding.EXTRA_TESTS:
+            a = t["achievement"]
+            ach.append({"id": t["id"], "icon": a["icon"], "label": a["label"], "got": t["id"] in extra})
+        ach.append({"id": "portrait", "icon": "🎨", "label": "портрет собран", "got": portrait_done})
+        ach.append({"id": "sessions10", "icon": "💬", "label": "10 сеансов", "got": sessions >= MOOD_MIN_SESSIONS})
+        return {
+            "sessions": sessions, "user_msgs": st["user_msgs"], "days_since_reg": round(days, 1),
+            "mood": mood, "mood_remaining": max(0, MOOD_MIN_SESSIONS - sessions),
+            "tests": tests_done, "portrait": portrait_done,
+            "analytics_unlocked": days >= ANALYTICS_MIN_DAYS,
+            "analytics_in_days": max(0, round(ANALYTICS_MIN_DAYS - days, 1)),
+            "achievements": ach,
+        }
+
     # ── GET ──
     def do_GET(self):
         u = urlparse(self.path)
@@ -105,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
             self._google_callback(u); return
         if p == "/api/onboarding/questions":
             self._json(200, {"questions": onboarding.questions_public()}); return
+        if p == "/api/tests":
+            self._json(200, {"tests": onboarding.extra_tests_public()}); return
         if p == "/api/me":
             user = store.user_by_token(self._bearer())
             if not user:
@@ -112,6 +146,18 @@ class Handler(BaseHTTPRequestHandler):
             prof = store.get_profile(user["id"])
             self._json(200, {"user": user, "onboarded": bool(prof.get("onboarded")),
                              "compiled": prof.get("compiled", "")}); return
+        if p == "/api/stats":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            self._json(200, self._build_stats(user["id"])); return
+        if p == "/api/documents":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            self._json(200, {"documents": store.list_documents(user["id"]),
+                             "total": store.documents_total(user["id"]),
+                             "limit": DOC_TOTAL_BYTES}); return
         # статика
         rel = p.lstrip("/") or "index.html"
         target = (WEBAPP_DIR / rel).resolve()
@@ -172,8 +218,10 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     answers = {}
                 raw_info = prof.get("raw_info") or ""
+                extra = store.get_extra_tests(uid)
+                docs = store.documents_text(uid)
                 try:
-                    compiled = onboarding.compile_profile(answers, raw_info)
+                    compiled = onboarding.compile_profile(answers, raw_info, extra, docs)
                     store.set_compiled(uid, compiled)
                     self._json(200, {"ok": True, "compiled": compiled}); return
                 except Exception as e:
@@ -187,14 +235,50 @@ class Handler(BaseHTTPRequestHandler):
                     answers = json.loads(prof.get("test_answers") or "{}")
                 except Exception:
                     answers = {}
+                extra = store.get_extra_tests(uid)
+                docs = store.documents_text(uid)
 
                 def bg():
                     try:
-                        store.set_compiled(uid, onboarding.compile_profile(answers, raw_info))
+                        store.set_compiled(uid, onboarding.compile_profile(answers, raw_info, extra, docs))
                     except Exception as e:
                         print("recompile fail:", e, flush=True)
                 threading.Thread(target=bg, daemon=True).start()
                 self._json(200, {"ok": True}); return
+
+            if u.path == "/api/tests/submit":
+                tid = (body.get("test_id") or "").strip()
+                tans = body.get("answers") or {}
+                valid = {t["id"] for t in onboarding.EXTRA_TESTS}
+                if tid not in valid:
+                    self._json(400, {"error": "unknown test"}); return
+                extra = store.get_extra_tests(uid)
+                extra[tid] = tans
+                store.save_extra_tests(uid, extra)
+                self._json(200, {"ok": True, "stats": self._build_stats(uid)}); return
+
+            if u.path == "/api/documents":
+                name = (body.get("name") or "файл").strip()[:120]
+                content = body.get("content") or ""
+                size = len(content.encode("utf-8"))
+                if size == 0:
+                    self._json(400, {"error": "пустой файл"}); return
+                if size > DOC_MAX_BYTES:
+                    self._json(413, {"error": "файл больше 1 МБ"}); return
+                if store.documents_total(uid) + size > DOC_TOTAL_BYTES:
+                    self._json(413, {"error": "досье переполнено (лимит 5 МБ)"}); return
+                store.add_document(uid, name, content)
+                self._json(200, {"ok": True, "documents": store.list_documents(uid),
+                                 "total": store.documents_total(uid)}); return
+
+            if u.path == "/api/documents/delete":
+                try:
+                    did = int(body.get("id"))
+                except Exception:
+                    self._json(400, {"error": "bad id"}); return
+                store.delete_document(uid, did)
+                self._json(200, {"ok": True, "documents": store.list_documents(uid),
+                                 "total": store.documents_total(uid)}); return
 
             if u.path == "/api/v2/chat":
                 text = (body.get("q") or "").strip()
