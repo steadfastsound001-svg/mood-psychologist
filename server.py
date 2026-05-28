@@ -155,20 +155,29 @@ class Handler(BaseHTTPRequestHandler):
             uid = user["id"]
 
             if u.path == "/api/onboarding/submit":
+                # сохраняем ответы, помечаем онбординг пройденным. Портрет НЕ компилируем —
+                # это делается по запросу через /api/profile/compile.
                 answers = body.get("answers") or {}
                 raw_info = body.get("raw_info") or ""
                 store.save_test_answers(uid, answers)
                 if raw_info:
                     store.save_raw_info(uid, raw_info)
-                store.set_compiled(uid, "")
-
-                def bg():
-                    try:
-                        store.set_compiled(uid, onboarding.compile_profile(answers, raw_info))
-                    except Exception as e:
-                        print("compile fail:", e, flush=True)
-                threading.Thread(target=bg, daemon=True).start()
+                store.set_compiled(uid, "")  # onboarded=1, портрет пустой
                 self._json(200, {"ok": True}); return
+
+            if u.path == "/api/profile/compile":
+                prof = store.get_profile(uid)
+                try:
+                    answers = json.loads(prof.get("test_answers") or "{}")
+                except Exception:
+                    answers = {}
+                raw_info = prof.get("raw_info") or ""
+                try:
+                    compiled = onboarding.compile_profile(answers, raw_info)
+                    store.set_compiled(uid, compiled)
+                    self._json(200, {"ok": True, "compiled": compiled}); return
+                except Exception as e:
+                    self._json(500, {"error": str(e)}); return
 
             if u.path == "/api/profile/info":
                 raw_info = body.get("raw_info") or ""

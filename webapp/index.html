@@ -17,7 +17,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="apple-touch-startup-image" href="/icon-1024.png">
 
-<link rel="stylesheet" href="/style.css?v=16">
+<link rel="stylesheet" href="/style.css?v=17">
 </head>
 <body>
 
@@ -61,10 +61,6 @@
     <button class="btn-ghost" id="obBack" hidden>назад</button>
     <button class="btn-primary" id="obNext">дальше</button>
   </div>
-  <div class="onboard-compiling" id="obCompiling" hidden>
-    <div class="spinner"></div>
-    <div>собираю твой портрет…</div>
-  </div>
 </div>
 
 <!-- ───────── APP ───────── -->
@@ -93,8 +89,10 @@
       <div class="prof-row"><span class="prof-k">email</span><span class="prof-v" id="profEmail">—</span></div>
     </section>
     <section class="card">
-      <h3>что психолог знает о тебе</h3>
-      <div id="profCompiled" class="prof-compiled">—</div>
+      <h3>портрет</h3>
+      <div id="profCompiled" class="prof-compiled">портрет ещё не собран</div>
+      <button class="btn-primary" id="profCompile" style="margin-top:12px">собрать портрет</button>
+      <div class="prof-saved" id="profCompiling" hidden>собираю…</div>
     </section>
     <section class="card">
       <h3>добавить о себе</h3>
@@ -125,6 +123,6 @@
     navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {});
   }
 </script>
-<script src="/app.js?v=16"></script>
+<script src="/app.js?v=17"></script>
 </body>
 </html>

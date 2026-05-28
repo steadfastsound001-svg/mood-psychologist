@@ -205,6 +205,7 @@ function initApp() {
     });
     setupChat();
     $("profSave").onclick = saveProfileInfo;
+    $("profCompile").onclick = compilePortrait;
     $("logoutBtn").onclick = () => { clearToken(); location.reload(); };
   }
   switchView("chat");
@@ -295,9 +296,25 @@ async function loadProfile() {
   $("profEmail").textContent = window.__me?.email || "—";
   try {
     const me = await api("/api/me");
-    $("profCompiled").innerHTML = me.compiled ? mdLite(me.compiled) : "портрет появится после онбординга";
+    $("profCompiled").innerHTML = me.compiled ? mdLite(me.compiled) : "портрет ещё не собран — нажми кнопку ниже";
   } catch (_) {
     $("profCompiled").textContent = "—";
+  }
+}
+
+async function compilePortrait() {
+  const btn = $("profCompile");
+  btn.disabled = true;
+  $("profCompiling").hidden = false;
+  try {
+    const r = await api("/api/profile/compile", { method: "POST", body: {}, timeout: 90000 });
+    if (r.compiled) $("profCompiled").innerHTML = mdLite(r.compiled);
+    hapticOk();
+  } catch (e) {
+    $("profCompiled").textContent = "не удалось собрать: " + e.message;
+  } finally {
+    $("profCompiling").hidden = true;
+    btn.disabled = false;
   }
 }
 
