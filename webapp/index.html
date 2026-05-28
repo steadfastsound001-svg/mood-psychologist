@@ -17,7 +17,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="apple-touch-startup-image" href="/icon-1024.png">
 
-<link rel="stylesheet" href="/style.css?v=14">
+<link rel="stylesheet" href="/style.css?v=15">
 </head>
 <body>
 
@@ -120,19 +120,20 @@
 </div>
 
 <script>
-  // KILL-SWITCH: удаляем любой старый service worker и чистим кэши.
-  // SW кэш ломал обновления в Safari — для прототипа работаем напрямую с сервером.
+  // KILL-SWITCH: убиваем старый service worker + кэши.
   (function () {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.getRegistrations().then((regs) => {
-        regs.forEach((r) => r.unregister());
-      }).catch(() => {});
+      navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {});
     }
     if (window.caches && caches.keys) {
       caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
     }
   })();
+  // Анти-bfcache: если Safari восстановил страницу из back-forward кэша — перезагружаем со свежим кодом.
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted) location.reload();
+  });
 </script>
-<script src="/app.js?v=14"></script>
+<script src="/app.js?v=15"></script>
 </body>
 </html>
