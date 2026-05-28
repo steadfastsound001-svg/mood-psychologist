@@ -205,7 +205,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         p = u.path
         if p == "/api/health":
-            self._json(200, {"ok": True}); return
+            self._json(200, {"ok": True, "db": "turso" if store._turso_on() else "sqlite"}); return
         if p == "/api/auth/google/enabled":
             self._json(200, {"enabled": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)}); return
         if p == "/api/auth/google":
