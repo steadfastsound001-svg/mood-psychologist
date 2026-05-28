@@ -4,7 +4,7 @@
 `client.messages.create(model=..., max_tokens=..., system=..., messages=...)` сохранён,
 внутри идёт HTTP в OpenRouter chat completions. Это позволяет не переписывать остальной код.
 
-Модель из ENV LLM_MODEL (по умолч. deepseek/deepseek-chat-v3.1:free).
+Модель из ENV LLM_MODEL (по умолч. deepseek/deepseek-v4-flash:free).
 Кэш-блоки (cache_control) и блочный `system` от Anthropic просто склеиваются в один system-промпт.
 """
 import os
@@ -194,18 +194,11 @@ async def stream_completion(
     model: str | None = None,
     task: str | None = None,
 ):
+    """Async-генератор дельт текста от OpenRouter (SSE), с fallback по моделям."""
     if task:
         preferred = _model_for_task(task)
         if preferred:
             model = preferred
-    """Async-генератор дельт текста от OpenRouter (SSE).
-
-    Использование:
-        async for delta in stream_completion(system=..., messages=[...]):
-            ...
-
-    Если выбранная модель упала — переключается по fallback-цепочке.
-    """
     sys_text = _flatten_system(system)
     chat = []
     if sys_text:

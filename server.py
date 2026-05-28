@@ -3,7 +3,6 @@
 Эндпойнты: health, auth (register/login/google), onboarding, profile, v2/chat, статика webapp/.
 Порт из ENV PORT (Fly/Render дают 8080). SQLite в data/ (на Fly — persistent volume).
 """
-import asyncio
 import json
 import mimetypes
 import os
@@ -288,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
                 messages = store.recent_messages(uid, 20) + [{"role": "user", "content": text}]
                 resp = client.messages.create(
                     system=user_system(prof.get("compiled", "")),
-                    messages=messages, max_tokens=130, task="dialog",
+                    messages=messages, max_tokens=220, task="dialog",
                 )
                 reply = resp.content[0].text
                 store.add_message(uid, "user", text)

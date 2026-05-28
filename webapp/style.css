@@ -17,9 +17,9 @@
   --ring-bad: #ff453a;
   --ring-info: #64d2ff;
 
-  /* Spectrum gradients (Apple Intelligence-vibe) */
-  --grad-spectrum: linear-gradient(135deg, #64d2ff 0%, #7c5fff 50%, #ff5fa8 100%);
-  --grad-spectrum-soft: linear-gradient(135deg, rgba(100,210,255,0.22) 0%, rgba(124,95,255,0.22) 50%, rgba(255,95,168,0.22) 100%);
+  /* Single refined accent — Apple systemIndigo → violet (minimal, premium) */
+  --grad-spectrum: linear-gradient(135deg, #5e5ce6 0%, #7c5fff 100%);
+  --grad-spectrum-soft: linear-gradient(135deg, rgba(94,92,230,0.20) 0%, rgba(124,95,255,0.20) 100%);
   --grad-warm: linear-gradient(135deg, #ffd60a 0%, #ff9f0a 50%, #ff453a 100%);
   --grad-cool: linear-gradient(135deg, #30d158 0%, #64d2ff 100%);
   --grad-violet: linear-gradient(135deg, #7c5fff 0%, #ff5fa8 100%);
@@ -61,9 +61,8 @@
 html, body {
   margin: 0; padding: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124, 95, 255, 0.18) 0%, transparent 55%),
-    radial-gradient(ellipse 70% 40% at 100% 100%, rgba(255, 95, 168, 0.10) 0%, transparent 55%),
-    radial-gradient(ellipse 60% 40% at 0% 80%, rgba(100, 210, 255, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 55% at 50% -15%, rgba(124, 95, 255, 0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 45% at 50% 115%, rgba(94, 92, 230, 0.07) 0%, transparent 60%),
     var(--bg);
   color: var(--text);
   font-family: "Inter", -apple-system, "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -1028,3 +1027,25 @@ body.has-cursor .cursor-dot, body.has-cursor .cursor-ring {
 @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .test-sheet .onboard-body { flex: 1; gap: 18px; }
 .test-sheet .onboard-q { font-size: var(--t-title-3); }
+
+/* ═══════════ v22: полировка перед релизом ═══════════ */
+
+/* доступность: уважаем системную настройку «меньше движения» (Apple-стандарт) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* клавиатурная навигация: видимое кольцо фокуса только для tab, не для тача */
+:focus-visible {
+  outline: 2px solid rgba(124, 95, 255, 0.7);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+.field:focus:not(:focus-visible) { outline: none; }
