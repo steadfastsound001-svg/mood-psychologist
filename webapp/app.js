@@ -154,18 +154,20 @@ function renderQuestion() {
   box.innerHTML = "";
 
   if (q.type === "scale") {
+    // на шкалах кнопка "дальше" не нужна — тап варианта сразу ведёт дальше
+    $("obNext").style.display = "none";
     const wrap = document.createElement("div");
     wrap.className = "scale-wrap";
     (q.labels || ["1","2","3","4","5"]).forEach((label, i) => {
       const b = document.createElement("button");
       b.className = "scale-btn" + (obAnswers[q.id] === i + 1 ? " sel" : "");
       b.innerHTML = `<span class="scale-num">${i + 1}</span><span class="scale-lbl">${label}</span>`;
-      b.onclick = () => { haptic(); obAnswers[q.id] = i + 1; renderQuestion(); setTimeout(obNext, 180); };
+      b.onclick = () => { haptic(); obAnswers[q.id] = i + 1; setTimeout(obNext, 160); };
       wrap.appendChild(b);
     });
     box.appendChild(wrap);
-    $("obNext").textContent = "пропустить";
   } else {
+    $("obNext").style.display = "";
     const ta = document.createElement("textarea");
     ta.className = "field area";
     ta.rows = q.short ? 1 : 4;
