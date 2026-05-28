@@ -1,0 +1,11 @@
+.env
+data/
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+master_profile.md
+supplement_profile.md
+profile_compact.md
+learned_profile.md
+webapp/avatar.jpg

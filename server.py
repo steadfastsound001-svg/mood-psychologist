@@ -1,0 +1,262 @@
+"""Standalone SaaS-сервер психолога. Без Telegram/whisper/Apple Notes — деплоится на любой Python-хостинг.
+
+Эндпойнты: health, auth (register/login/google), onboarding, profile, v2/chat, статика webapp/.
+Порт из ENV PORT (Fly/Render дают 8080). SQLite в data/ (на Fly — persistent volume).
+"""
+import asyncio
+import json
+import mimetypes
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse, parse_qs, urlencode
+
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).parent
+load_dotenv(ROOT / ".env", override=True)
+
+import store
+import onboarding
+from llm import Anthropic
+from agent_core import user_system
+
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+
+PORT = int(os.environ.get("PORT", "8080"))
+WEBAPP_DIR = ROOT / "webapp"
+DIALOG_LIMIT = 30
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip("/")
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        return
+
+    # ── helpers ──
+    def _json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _bearer(self):
+        h = self.headers.get("Authorization", "")
+        return h[7:].strip() if h.startswith("Bearer ") else ""
+
+    def _body(self):
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except Exception:
+            n = 0
+        raw = self.rfile.read(n) if n else b""
+        try:
+            return json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            return {}
+
+    def _base_url(self):
+        if PUBLIC_URL:
+            return PUBLIC_URL
+        proto = self.headers.get("X-Forwarded-Proto", "https")
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", f"localhost:{PORT}")
+        return f"{proto}://{host}"
+
+    def _redirect(self, loc):
+        self.send_response(302)
+        self.send_header("Location", loc)
+        self.end_headers()
+
+    def _send_file(self, path: Path):
+        ct, _ = mimetypes.guess_type(str(path))
+        if path.suffix == ".json":
+            ct = "application/manifest+json" if path.name == "manifest.json" else "application/json"
+        elif path.suffix == ".js":
+            ct = "application/javascript; charset=utf-8"
+        elif path.suffix == ".svg":
+            ct = "image/svg+xml"
+        ct = ct or "application/octet-stream"
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ct)
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    # ── GET ──
+    def do_GET(self):
+        u = urlparse(self.path)
+        p = u.path
+        if p == "/api/health":
+            self._json(200, {"ok": True}); return
+        if p == "/api/auth/google/enabled":
+            self._json(200, {"enabled": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)}); return
+        if p == "/api/auth/google":
+            self._google_redirect(); return
+        if p == "/api/auth/google/callback":
+            self._google_callback(u); return
+        if p == "/api/onboarding/questions":
+            self._json(200, {"questions": onboarding.questions_public()}); return
+        if p == "/api/me":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            prof = store.get_profile(user["id"])
+            self._json(200, {"user": user, "onboarded": bool(prof.get("onboarded")),
+                             "compiled": prof.get("compiled", "")}); return
+        # статика
+        rel = p.lstrip("/") or "index.html"
+        target = (WEBAPP_DIR / rel).resolve()
+        try:
+            target.relative_to(WEBAPP_DIR.resolve())
+        except ValueError:
+            self.send_error(403); return
+        if not target.is_file():
+            # SPA-fallback на index
+            target = WEBAPP_DIR / "index.html"
+            if not target.is_file():
+                self.send_error(404); return
+        self._send_file(target)
+
+    # ── POST ──
+    def do_POST(self):
+        u = urlparse(self.path)
+        body = self._body()
+        try:
+            if u.path == "/api/auth/register":
+                email = (body.get("email") or "").strip().lower()
+                pw = body.get("password") or ""
+                if not email or len(pw) < 4:
+                    self._json(400, {"error": "нужен email и пароль от 4 символов"}); return
+                user = store.create_user(email, pw, (body.get("name") or "").strip())
+                if not user:
+                    self._json(409, {"error": "email уже занят"}); return
+                self._json(200, {"token": store.create_session(user["id"]), "user": user}); return
+
+            if u.path == "/api/auth/login":
+                user = store.verify_user((body.get("email") or "").strip().lower(), body.get("password") or "")
+                if not user:
+                    self._json(401, {"error": "неверный email или пароль"}); return
+                prof = store.get_profile(user["id"])
+                self._json(200, {"token": store.create_session(user["id"]), "user": user,
+                                 "onboarded": bool(prof.get("onboarded"))}); return
+
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            uid = user["id"]
+
+            if u.path == "/api/onboarding/submit":
+                answers = body.get("answers") or {}
+                raw_info = body.get("raw_info") or ""
+                store.save_test_answers(uid, answers)
+                if raw_info:
+                    store.save_raw_info(uid, raw_info)
+                store.set_compiled(uid, "")
+
+                def bg():
+                    try:
+                        store.set_compiled(uid, onboarding.compile_profile(answers, raw_info))
+                    except Exception as e:
+                        print("compile fail:", e, flush=True)
+                threading.Thread(target=bg, daemon=True).start()
+                self._json(200, {"ok": True}); return
+
+            if u.path == "/api/profile/info":
+                raw_info = body.get("raw_info") or ""
+                store.save_raw_info(uid, raw_info)
+                prof = store.get_profile(uid)
+                try:
+                    answers = json.loads(prof.get("test_answers") or "{}")
+                except Exception:
+                    answers = {}
+
+                def bg():
+                    try:
+                        store.set_compiled(uid, onboarding.compile_profile(answers, raw_info))
+                    except Exception as e:
+                        print("recompile fail:", e, flush=True)
+                threading.Thread(target=bg, daemon=True).start()
+                self._json(200, {"ok": True}); return
+
+            if u.path == "/api/v2/chat":
+                text = (body.get("q") or "").strip()
+                if not text:
+                    self._json(400, {"error": "empty"}); return
+                prof = store.get_profile(uid)
+                messages = store.recent_messages(uid, 20) + [{"role": "user", "content": text}]
+                resp = client.messages.create(
+                    system=user_system(prof.get("compiled", "")),
+                    messages=messages, max_tokens=130, task="dialog",
+                )
+                reply = resp.content[0].text
+                store.add_message(uid, "user", text)
+                store.add_message(uid, "assistant", reply)
+                self._json(200, {"reply": reply}); return
+
+            self._json(404, {"error": "not found"})
+        except Exception as e:
+            self._json(500, {"error": str(e)})
+
+    # ── google oauth ──
+    def _google_redirect(self):
+        if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
+            self._json(400, {"error": "google не настроен"}); return
+        params = urlencode({
+            "client_id": GOOGLE_CLIENT_ID,
+            "redirect_uri": self._base_url() + "/api/auth/google/callback",
+            "response_type": "code",
+            "scope": "openid email profile",
+            "access_type": "online",
+            "prompt": "select_account",
+        })
+        self._redirect("https://accounts.google.com/o/oauth2/v2/auth?" + params)
+
+    def _google_callback(self, u):
+        import httpx
+        code = parse_qs(u.query).get("code", [""])[0]
+        base = self._base_url()
+        if not code:
+            self._redirect(base + "/?auth_error=1"); return
+        try:
+            with httpx.Client(timeout=30) as cli:
+                tok = cli.post("https://oauth2.googleapis.com/token", data={
+                    "code": code, "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": base + "/api/auth/google/callback",
+                    "grant_type": "authorization_code",
+                }).json()
+                access = tok.get("access_token")
+                if not access:
+                    self._redirect(base + "/?auth_error=token"); return
+                info = cli.get("https://www.googleapis.com/oauth2/v2/userinfo",
+                               headers={"Authorization": "Bearer " + access}).json()
+            email = info.get("email")
+            if not email:
+                self._redirect(base + "/?auth_error=email"); return
+            user = store.get_or_create_oauth_user(email, info.get("name") or "")
+            token = store.create_session(user["id"])
+            prof = store.get_profile(user["id"])
+            self._redirect(base + f"/?token={token}&onb={1 if prof.get('onboarded') else 0}")
+        except Exception as e:
+            print("google callback error:", e, flush=True)
+            self._redirect(base + "/?auth_error=server")
+
+
+def main():
+    store.init_db()
+    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"SaaS-сервер на :{PORT}", flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>MOOD</title>
+
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MOOD">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-startup-image" href="/icon-1024.png">
+
+<link rel="stylesheet" href="/style.css?v=13">
+</head>
+<body>
+
+<!-- ───────── AUTH ───────── -->
+<div id="authScreen" class="screen" hidden>
+  <div class="auth-card">
+    <div class="auth-logo">◆</div>
+    <div class="auth-title">MOOD</div>
+    <div class="auth-sub">персональный психолог</div>
+
+    <input class="field" id="authName" type="text" placeholder="имя" autocomplete="name" hidden>
+    <input class="field" id="authEmail" type="email" placeholder="email" autocomplete="email" autocapitalize="off">
+    <input class="field" id="authPass" type="password" placeholder="пароль" autocomplete="current-password">
+
+    <button class="btn-primary" id="authSubmit">войти</button>
+    <div class="auth-error" id="authError" hidden></div>
+
+    <div class="auth-or" id="authOr" hidden><span>или</span></div>
+    <a class="btn-google" id="googleBtn" href="/api/auth/google" hidden>
+      <span class="g-icon">G</span> войти через Google
+    </a>
+
+    <div class="auth-switch">
+      <span id="authSwitchText">нет аккаунта?</span>
+      <button class="link" id="authSwitchBtn">создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── ONBOARDING ───────── -->
+<div id="onboardScreen" class="screen" hidden>
+  <div class="onboard-head">
+    <div class="onboard-progress"><div class="onboard-progress-fill" id="obFill"></div></div>
+    <div class="onboard-step" id="obStep"></div>
+  </div>
+  <div class="onboard-body">
+    <div class="onboard-q" id="obQuestion"></div>
+    <div class="onboard-answer" id="obAnswer"></div>
+  </div>
+  <div class="onboard-foot">
+    <button class="btn-ghost" id="obBack" hidden>назад</button>
+    <button class="btn-primary" id="obNext">дальше</button>
+  </div>
+  <div class="onboard-compiling" id="obCompiling" hidden>
+    <div class="spinner"></div>
+    <div>собираю твой портрет…</div>
+  </div>
+</div>
+
+<!-- ───────── APP ───────── -->
+<div class="wrap app" id="app" hidden>
+
+  <!-- CHAT view -->
+  <div id="chatView" class="chat-view">
+    <div class="chat-topbar">
+      <div class="chat-topbar-title">психолог</div>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-bar">
+      <textarea class="chat-input" id="chatInput" rows="1" placeholder="напиши что внутри…" autocomplete="off"></textarea>
+      <button class="chat-send" id="chatSend" title="отправить" disabled>↑</button>
+    </div>
+  </div>
+
+  <!-- PROFILE view -->
+  <div id="profileView" class="profile-view" hidden>
+    <div class="page-header">
+      <div class="page-title">ПРОФИЛЬ</div>
+    </div>
+    <section class="card">
+      <h3>аккаунт</h3>
+      <div class="prof-row"><span class="prof-k">имя</span><span class="prof-v" id="profName">—</span></div>
+      <div class="prof-row"><span class="prof-k">email</span><span class="prof-v" id="profEmail">—</span></div>
+    </section>
+    <section class="card">
+      <h3>что психолог знает о тебе</h3>
+      <div id="profCompiled" class="prof-compiled">—</div>
+    </section>
+    <section class="card">
+      <h3>добавить о себе</h3>
+      <textarea class="field area" id="profInfo" rows="5" placeholder="всё что важно: контекст, прошлое, отношения, цели…"></textarea>
+      <button class="btn-primary" id="profSave">сохранить и обновить портрет</button>
+      <div class="prof-saved" id="profSaved" hidden>обновил портрет ✓</div>
+    </section>
+    <section class="card">
+      <button class="btn-ghost full" id="logoutBtn">выйти</button>
+    </section>
+  </div>
+
+  <nav class="tab-bar">
+    <button class="tab-item active" data-view="chat">
+      <span class="tab-icon">◆</span>
+      <span class="tab-label">CHAT</span>
+    </button>
+    <button class="tab-item" data-view="profile">
+      <span class="tab-icon">◐</span>
+      <span class="tab-label">ПРОФИЛЬ</span>
+    </button>
+  </nav>
+</div>
+
+<script>
+  // KILL-SWITCH: удаляем любой старый service worker и чистим кэши.
+  // SW кэш ломал обновления в Safari — для прототипа работаем напрямую с сервером.
+  (function () {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((r) => r.unregister());
+      }).catch(() => {});
+    }
+    if (window.caches && caches.keys) {
+      caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+    }
+  })();
+</script>
+<script src="/app.js?v=13"></script>
+</body>
+</html>

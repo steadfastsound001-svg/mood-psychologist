@@ -1,0 +1,17 @@
+bot.py
+snapshot.py
+retriever.py
+consolidate_profile.py
+import_old_entries.py
+import_journal_to_log.py
+master_profile.md
+supplement_profile.md
+profile_compact.md
+learned_profile.md
+data/
+*.log
+__pycache__/
+*.pyc
+.env
+.DS_Store
+webapp/avatar.jpg
