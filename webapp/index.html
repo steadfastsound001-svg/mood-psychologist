@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=20">
+<link rel="stylesheet" href="/style.css?v=21">
 </head>
 <body>
 
@@ -190,11 +190,14 @@
 </div>
 
 <script>
-  // Разовая чистка старого service worker (без reload-циклов).
+  // Разовая чистка старого service worker + Cache Storage (без reload-циклов).
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {});
   }
+  if (window.caches && caches.keys) {
+    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+  }
 </script>
-<script src="/app.js?v=20"></script>
+<script src="/app.js?v=21"></script>
 </body>
 </html>
