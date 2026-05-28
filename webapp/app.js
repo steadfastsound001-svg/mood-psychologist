@@ -184,17 +184,14 @@ async function obNext() {
     renderQuestion();
     return;
   }
-  // финал — отправляем; портрет компилируется в фоне на сервере
-  $("obCompiling").hidden = false;
+  // fire-and-forget: НЕ ждём ответа сервера, портрет собирается в фоне.
+  // Мгновенно пускаем в приложение — никакого блокирующего overlay.
   try {
-    await api("/api/onboarding/submit", { method: "POST", body: { answers: obAnswers, raw_info: "" }, timeout: 20000 });
-    hapticOk();
-  } catch (e) {
-    console.warn("submit error (продолжаем):", e);
-  }
-  // в любом случае пускаем в приложение — не залипаем на overlay
-  $("obCompiling").hidden = true;
-  try { initApp(); } catch (e) { console.warn("initApp error:", e); show("app"); }
+    api("/api/onboarding/submit", { method: "POST", body: { answers: obAnswers, raw_info: "" }, timeout: 90000 })
+      .catch((e) => console.warn("submit bg error:", e));
+  } catch (e) { console.warn(e); }
+  hapticOk();
+  try { initApp(); } catch (e) { console.warn("initApp error:", e); }
   show("app");
 }
 
