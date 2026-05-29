@@ -1364,6 +1364,11 @@ a:focus:not(:focus-visible),
   transition: width 0.9s cubic-bezier(0.22,1,0.36,1), background 0.4s;
 }
 .dynmood-note { font-size: var(--t-callout); line-height: 1.45; color: var(--text); }
+.dynmood-desc {
+  margin-top: 14px; font-family: var(--font-serif);
+  font-size: var(--t-body); line-height: 1.6; color: var(--text);
+}
+.dynmood-desc:empty { display: none; }
 .dynmood-foot { margin-top: 12px; font-size: var(--t-caption); color: var(--hint); }
 
 .auth-hint {

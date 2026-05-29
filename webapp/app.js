@@ -644,11 +644,12 @@ async function loadDynMood(tries = 0) {
   if (!card) return;
   let d;
   try { d = await api("/api/v2/dynamic-mood", { timeout: 15000 }); } catch (_) { d = null; }
-  const num = $("dynMoodNum"), bar = $("dynMoodBar"), note = $("dynMoodNote"), foot = $("dynMoodFoot");
+  const num = $("dynMoodNum"), bar = $("dynMoodBar"), note = $("dynMoodNote"), foot = $("dynMoodFoot"), desc = $("dynMoodDesc");
   if (!d || d.score == null) {
     num.textContent = "—";
     bar.style.width = "0%";
     note.textContent = (d && d.note) || "веди дневник — настрой посчитается за 10 дней";
+    if (desc) desc.textContent = "";
     foot.textContent = "";
     // пока считается в фоне — мягко перепроверяем, пока пользователь на вкладке
     if (d && d.pending && tries < 5) {
@@ -656,6 +657,7 @@ async function loadDynMood(tries = 0) {
     }
     return;
   }
+  if (desc) desc.textContent = d.desc || "";
   animateNum(num, d.score);
   bar.style.width = d.score + "%";
   bar.style.background = d.score >= 65 ? "#30d158" : d.score >= 45 ? "#ffd60a" : "#ff9f0a";

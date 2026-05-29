@@ -112,8 +112,8 @@ mat. emoji-заголовки. markdown кроме **bold**.
 — никакого другого markdown."""
 
 
-def user_system(compiled_profile: str) -> list:
-    """Универсальное ядро + персональный профиль клиента."""
+def user_system(compiled_profile: str, insights: str = "") -> list:
+    """Универсальное ядро + персональный профиль клиента + живые инсайты (само-обучение)."""
     blocks = [{"type": "text", "text": SYSTEM_BASE}]
     cp = (compiled_profile or "").strip()
     if cp:
@@ -126,6 +126,16 @@ def user_system(compiled_profile: str) -> list:
         blocks.append({
             "type": "text",
             "text": "<профиль_клиента>клиент ещё не прошёл онбординг. узнавай его в диалоге, мягко.</профиль_клиента>",
+        })
+    ins = (insights or "").strip()
+    if ins:
+        blocks.append({
+            "type": "text",
+            "text": ("<что_узнал_в_работе>\n" + ins +
+                     "\n</что_узнал_в_работе>\n"
+                     "это твои живые наблюдения за этим человеком из прошлых сессий. "
+                     "опирайся на них, давай более точные и персональные ходы. не зачитывай их вслух."),
+            "cache_control": {"type": "ephemeral"},
         })
     return blocks
 

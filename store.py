@@ -140,6 +140,15 @@ def init_db() -> None:
         execute("ALTER TABLE profiles ADD COLUMN dyn_mood TEXT DEFAULT ''")
     except Exception:
         pass
+    # миграция: «живой профиль» — инсайты, что агент узнал о клиенте в диалогах (само-обучение).
+    try:
+        execute("ALTER TABLE profiles ADD COLUMN insights TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        execute("ALTER TABLE profiles ADD COLUMN insights_at REAL DEFAULT 0")
+    except Exception:
+        pass
 
 
 # ───────────── auth ─────────────
@@ -362,6 +371,24 @@ def set_dyn_mood(user_id: int, data: dict) -> None:
     import json
     execute("UPDATE profiles SET dyn_mood=? WHERE user_id=?",
             (json.dumps(data, ensure_ascii=False), user_id))
+
+
+def get_insights(user_id: int) -> str:
+    rows = query("SELECT insights FROM profiles WHERE user_id=?", (user_id,))
+    return (rows[0].get("insights") or "") if rows else ""
+
+
+def get_insights_at(user_id: int) -> float:
+    rows = query("SELECT insights_at FROM profiles WHERE user_id=?", (user_id,))
+    try:
+        return float(rows[0].get("insights_at") or 0) if rows else 0
+    except Exception:
+        return 0
+
+
+def set_insights(user_id: int, text: str) -> None:
+    execute("UPDATE profiles SET insights=?, insights_at=? WHERE user_id=?",
+            (text, time.time(), user_id))
 
 
 def list_diary_entries(user_id: int, limit: int = 100) -> list[dict]:

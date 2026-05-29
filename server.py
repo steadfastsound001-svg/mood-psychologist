@@ -28,8 +28,8 @@ client = Anthropic()  # для нестримовых вызовов (weekly/ope
 PORT = int(os.environ.get("PORT", "8080"))
 WEBAPP_DIR = ROOT / "webapp"
 DIALOG_LIMIT = 30
-MOOD_MIN_SESSIONS = 10      # MOOD-оценка открывается после N сеансов
-ANALYTICS_MIN_DAYS = 10     # аналитика открывается после N дней
+MOOD_MIN_SESSIONS = 0       # MOOD-оценка: открыта сразу (считается, если пройден тест)
+ANALYTICS_MIN_DAYS = 0      # аналитика открыта сразу
 DYN_MOOD_DAYS = 10          # окно/период пересчёта динамичного MOOD по дневнику
 DOC_MAX_BYTES = 1_000_000   # лимит на один файл
 DOC_TOTAL_BYTES = 5_000_000 # суммарный лимит досье
@@ -44,27 +44,87 @@ _DYN_LOCK = threading.Lock()
 
 
 def _dyn_mood_compute(uid, entries):
-    """Фоновый подсчёт динамичного MOOD по записям дневника. Кэширует результат."""
+    """Фоновый подсчёт настроя за 10 дней по дневнику + перепискам с психологом. Кэширует."""
     try:
-        blob = "\n".join(f"— {e['text'][:600]}" for e in entries[-30:])
-        sys = ("ты психолог. на входе — записи дневника человека за последние 10 дней. "
-               "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично) "
-               "и дай одну короткую тёплую строку-наблюдение (на «ты», строчные, без воды). "
-               "верни СТРОГО JSON: {\"score\": <int 0-100>, \"note\": \"<одна строка>\"}")
+        now = time.time()
+        cutoff = now - DYN_MOOD_DAYS * 86400
+        diary_blob = "\n".join(f"— {e['text'][:600]}" for e in entries[-30:])
+        # реплики самого клиента из чата за окно
+        msgs = store.recent_messages(uid, 80)
+        chat_lines = [m["content"] for m in msgs if m.get("role") == "user"][-40:]
+        chat_blob = "\n".join(f"— {c[:400]}" for c in chat_lines)
+        blob = "[записи дневника]\n" + (diary_blob or "(нет)") + \
+               "\n\n[реплики в разговорах с психологом]\n" + (chat_blob or "(нет)")
+        sys = ("ты психолог. на входе — дневник и реплики клиента за последние 10 дней. "
+               "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично). "
+               "дай: note — одну короткую строку-резюме; desc — 2-3 предложения о том, как человек "
+               "чувствовал себя эти 10 дней (что было в фокусе, какие колебания, на чём держался). "
+               "на «ты», строчные, тепло и по делу, без воды и без markdown. "
+               "верни СТРОГО JSON: {\"score\": <int>, \"note\": \"<строка>\", \"desc\": \"<2-3 предложения>\"}")
         resp = client.messages.create(
             system=sys, messages=[{"role": "user", "content": blob}],
-            max_tokens=200, task="fast",
+            max_tokens=400, task="fast",
         )
         raw = resp.content[0].text.strip()
         m = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
         score = max(0, min(100, int(m.get("score"))))
         note = str(m.get("note") or "").strip()[:160]
-        store.set_dyn_mood(uid, {"score": score, "note": note, "n": len(entries), "ts": time.time()})
+        desc = str(m.get("desc") or "").strip()[:600]
+        store.set_dyn_mood(uid, {"score": score, "note": note, "desc": desc,
+                                 "n": len(entries) + len(chat_lines), "ts": now})
     except Exception as e:
         print(f"[dyn_mood] compute fail uid={uid}: {e}", flush=True)
     finally:
         with _DYN_LOCK:
             _DYN_COMPUTING.discard(uid)
+
+
+_LEARN_RUNNING = set()    # uid'ы, для которых сейчас идёт пере-осмысление профиля
+_LEARN_MIN_GAP = 1800     # не чаще раза в 30 минут
+
+
+def _learn_bg(uid):
+    """Само-обучение: агент обновляет живые заметки о клиенте из последних сессий."""
+    try:
+        msgs = store.recent_messages(uid, 40)
+        if not msgs:
+            return
+        convo = "\n".join(
+            f"{'клиент' if m.get('role') == 'user' else 'психолог'}: {m.get('content','')[:400]}"
+            for m in msgs[-30:]
+        )
+        prior = store.get_insights(uid)
+        sys = ("ты ведёшь личные рабочие заметки психолога об этом клиенте — чтобы со временем "
+               "понимать его всё точнее и давать всё более персональные ходы. "
+               "на входе: прошлые заметки и последние реплики из сессий. обнови заметки. "
+               "фиксируй ТОЛЬКО устойчивое: повторяющиеся паттерны, триггеры, что помогает и что не "
+               "работает с ним, ценности, цели, как с ним лучше говорить. разовое — выкидывай. "
+               "сжато, пунктами, до 1200 знаков, строчные, без воды и без markdown. "
+               "верни ТОЛЬКО обновлённый текст заметок.")
+        u = f"[прошлые заметки]\n{prior or '(пусто)'}\n\n[последние реплики]\n{convo}"
+        resp = client.messages.create(
+            system=sys, messages=[{"role": "user", "content": u}],
+            max_tokens=700, task="fast",
+        )
+        out = resp.content[0].text.strip()[:1600]
+        if out:
+            store.set_insights(uid, out)
+    except Exception as e:
+        print(f"[learn] fail uid={uid}: {e}", flush=True)
+    finally:
+        with _DYN_LOCK:
+            _LEARN_RUNNING.discard(uid)
+
+
+def _maybe_learn(uid):
+    """Запускает пере-осмысление в фоне, не чаще раза в 30 мин и не параллельно."""
+    if time.time() - store.get_insights_at(uid) < _LEARN_MIN_GAP:
+        return
+    with _DYN_LOCK:
+        if uid in _LEARN_RUNNING:
+            return
+        _LEARN_RUNNING.add(uid)
+    threading.Thread(target=_learn_bg, args=(uid,), daemon=True).start()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -163,6 +223,7 @@ class Handler(BaseHTTPRequestHandler):
     def _chat_stream(self, uid, text):
         """Стримит ответ психолога чанками (text/plain), затем сохраняет диалог."""
         prof = store.get_profile(uid)
+        insights = store.get_insights(uid)
         messages = store.recent_messages(uid, 20) + [{"role": "user", "content": text}]
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -173,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         acc = []
         try:
             for delta in stream_completion_sync(
-                system=user_system(prof.get("compiled", "")),
+                system=user_system(prof.get("compiled", ""), insights),
                 messages=messages, max_tokens=220, task="dialog",
             ):
                 acc.append(delta)
@@ -190,6 +251,7 @@ class Handler(BaseHTTPRequestHandler):
         if reply:
             store.add_message(uid, "user", text)
             store.add_message(uid, "assistant", reply)
+            _maybe_learn(uid)  # фоновое само-обучение по свежему разговору
 
     def _transcribe(self):
         """Распознаёт голос (сырые байты аудио) через Groq Whisper → {"text": ...}."""
@@ -221,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
             hint = "это первый разговор. поздоровайся коротко, по-человечески, и задай один открытый вопрос про то, что привело."
         else:
             hint = "вы уже общались. открой разговор живой личной фразой и одним точным вопросом — без «чем могу помочь»."
-        sys = user_system(compiled)
+        sys = user_system(compiled, store.get_insights(uid))
         try:
             resp = client.messages.create(
                 system=sys,
@@ -263,12 +325,13 @@ class Handler(BaseHTTPRequestHandler):
             left = max(0, DYN_MOOD_DAYS - int((now - cached.get("ts", 0)) // 86400))
             return {**cached, "days_left": left}
         entries = store.diary_since(uid, now - win)
-        if not entries:
+        has_chat = bool(store.recent_messages(uid, 1))
+        if not entries and not has_chat:
             if cached:
                 return {**cached, "days_left": 0, "stale": True}
-            return {"score": None, "note": "веди дневник — настрой посчитается по записям за 10 дней",
+            return {"score": None, "note": "веди дневник и говори с психологом — настрой посчитается за 10 дней",
                     "n": 0, "days_left": DYN_MOOD_DAYS}
-        # есть записи, но кэш пуст/устарел → считаем в фоне, ответ не ждёт LLM
+        # есть данные, но кэш пуст/устарел → считаем в фоне, ответ не ждёт LLM
         with _DYN_LOCK:
             fresh = uid not in _DYN_COMPUTING
             if fresh:
