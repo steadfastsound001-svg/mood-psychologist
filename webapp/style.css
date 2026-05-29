@@ -1366,6 +1366,11 @@ a:focus:not(:focus-visible),
 .dynmood-note { font-size: var(--t-callout); line-height: 1.45; color: var(--text); }
 .dynmood-foot { margin-top: 12px; font-size: var(--t-caption); color: var(--hint); }
 
+.auth-hint {
+  margin-top: 14px; font-size: var(--t-footnote); line-height: 1.5;
+  color: var(--hint); text-align: center;
+}
+
 .onboard-skip {
   display: block; margin: 18px auto 0; padding: 8px;
   background: none; border: none; color: var(--hint);

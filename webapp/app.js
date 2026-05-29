@@ -124,14 +124,20 @@ async function boot() {
 function initAuth() {
   const gbtn = $("googleBtn");
   if (!gbtn) return;
-  // Google блокирует OAuth во встроенных webview — открываем во внешнем браузере
-  gbtn.onclick = (e) => {
-    const url = new URL(gbtn.getAttribute("href"), location.origin).href;
-    if (tg && typeof tg.openLink === "function") {
+  const inTG = !!(tg && typeof tg.openLink === "function");
+  if (inTG) {
+    // Google блокирует OAuth внутри Telegram-webview → уводим всё приложение в обычный браузер
+    gbtn.innerHTML = '<span class="g-icon">G</span> войти в браузере';
+    const hint = $("authHint");
+    if (hint) hint.hidden = false;
+    gbtn.onclick = (e) => {
       e.preventDefault();
-      tg.openLink(url, { try_instant_view: false });
-    }
-  };
+      haptic("medium");
+      tg.openLink(location.origin, { try_instant_view: false });
+    };
+  } else {
+    gbtn.onclick = null; // обычный браузер — простой переход по href=/api/auth/google
+  }
 }
 
 /* ───────── ONBOARDING ───────── */
