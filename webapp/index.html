@@ -30,7 +30,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=32">
+<link rel="stylesheet" href="/style.css?v=33">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -123,6 +123,7 @@
           <div class="mr-center"><span class="mr-num" id="moodNum">—</span><span class="mr-lbl">MOOD</span></div>
         </div>
         <div class="mood-cap" id="moodCap"></div>
+        <div class="mood-chart" id="moodChart"></div>
       </div>
     </section>
 
@@ -224,6 +225,12 @@
     <div id="diaryList" class="diary-list"></div>
   </div>
 
+  <div class="install-banner" id="installBanner" hidden>
+    <span class="install-text" id="installText">добавь MOOD на домашний экран</span>
+    <button class="install-btn" id="installBtn">установить</button>
+    <button class="install-close" id="installClose" aria-label="закрыть">✕</button>
+  </div>
+
   <nav class="tab-bar">
     <button class="tab-item active" data-view="chat">
       <span class="tab-icon" data-ico="message-circle"></span>
@@ -266,6 +273,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=32"></script>
+<script src="/app.js?v=33"></script>
 </body>
 </html>

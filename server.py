@@ -121,18 +121,21 @@ def _learn_bg(uid):
             _LEARN_RUNNING.discard(uid)
 
 
-def _recompile_bg(uid):
-    """Фоновая пересборка портрета: ответы тестов + досье + raw_info → compiled."""
+def _compile_inputs(uid):
+    """Все источники о клиенте для сборки портрета: тесты + досье + дневник + что сам сказал."""
+    prof = store.get_profile(uid)
     try:
-        prof = store.get_profile(uid)
-        try:
-            answers = json.loads(prof.get("test_answers") or "{}")
-        except Exception:
-            answers = {}
-        compiled = onboarding.compile_profile(
-            answers, prof.get("raw_info") or "",
-            store.get_extra_tests(uid), store.documents_text(uid),
-        )
+        answers = json.loads(prof.get("test_answers") or "{}")
+    except Exception:
+        answers = {}
+    return (answers, prof.get("raw_info") or "", store.get_extra_tests(uid),
+            store.documents_text(uid), store.diary_text_blob(uid))
+
+
+def _recompile_bg(uid):
+    """Фоновая пересборка портрета из ВСЕХ источников (тесты, досье, дневник, raw_info)."""
+    try:
+        compiled = onboarding.compile_profile(*_compile_inputs(uid))
         if compiled:
             store.set_compiled(uid, compiled)
     except Exception as e:
@@ -148,6 +151,25 @@ def _maybe_learn(uid):
             return
         _LEARN_RUNNING.add(uid)
     threading.Thread(target=_learn_bg, args=(uid,), daemon=True).start()
+
+
+_RECOMPILE_RUNNING = set()
+
+
+def _maybe_recompile(uid):
+    """Фоновая пересборка портрета без дублей (дневник/досье изменились)."""
+    with _DYN_LOCK:
+        if uid in _RECOMPILE_RUNNING:
+            return
+        _RECOMPILE_RUNNING.add(uid)
+
+    def run():
+        try:
+            _recompile_bg(uid)
+        finally:
+            with _DYN_LOCK:
+                _RECOMPILE_RUNNING.discard(uid)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def _verify_telegram(init_data: str) -> dict | None:
@@ -380,6 +402,20 @@ class Handler(BaseHTTPRequestHandler):
         return {"score": None, "note": "считаю настрой по дневнику — загляни через минуту",
                 "n": len(entries), "days_left": DYN_MOOD_DAYS, "pending": True}
 
+    def _diary_feedback(self, text):
+        """Короткий психологический отклик на запись дневника (1-2 строки, голос психолога)."""
+        sys = ("ты психолог, читаешь запись дневника клиента. дай короткий живой отклик — "
+               "1-2 строки, на «ты», строчные. одно точное наблюдение или один мягкий вопрос. "
+               "без советов-шаблонов, без «понимаю/я рядом/это нормально», без markdown. только по сути записи.")
+        try:
+            resp = client.messages.create(
+                system=sys, messages=[{"role": "user", "content": text[:4000]}],
+                max_tokens=140, task="fast",
+            )
+            return resp.content[0].text.strip()[:400]
+        except Exception:
+            return ""
+
     def _diary_polish(self, raw):
         """Бот бережно вычищает запись дневника: орфография, пунктуация, абзацы.
         Смысл, тон и голос автора не меняет. При сбое — возвращает исходник."""
@@ -524,38 +560,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True}); return
 
             if u.path == "/api/profile/compile":
-                prof = store.get_profile(uid)
                 try:
-                    answers = json.loads(prof.get("test_answers") or "{}")
-                except Exception:
-                    answers = {}
-                raw_info = prof.get("raw_info") or ""
-                extra = store.get_extra_tests(uid)
-                docs = store.documents_text(uid)
-                try:
-                    compiled = onboarding.compile_profile(answers, raw_info, extra, docs)
+                    compiled = onboarding.compile_profile(*_compile_inputs(uid))
                     store.set_compiled(uid, compiled)
                     self._json(200, {"ok": True, "compiled": compiled}); return
                 except Exception as e:
                     self._json(500, {"error": str(e)}); return
 
             if u.path == "/api/profile/info":
-                raw_info = body.get("raw_info") or ""
-                store.save_raw_info(uid, raw_info)
-                prof = store.get_profile(uid)
-                try:
-                    answers = json.loads(prof.get("test_answers") or "{}")
-                except Exception:
-                    answers = {}
-                extra = store.get_extra_tests(uid)
-                docs = store.documents_text(uid)
-
-                def bg():
-                    try:
-                        store.set_compiled(uid, onboarding.compile_profile(answers, raw_info, extra, docs))
-                    except Exception as e:
-                        print("recompile fail:", e, flush=True)
-                threading.Thread(target=bg, daemon=True).start()
+                store.save_raw_info(uid, body.get("raw_info") or "")
+                threading.Thread(target=_recompile_bg, args=(uid,), daemon=True).start()
                 self._json(200, {"ok": True}); return
 
             if u.path == "/api/tests/submit":
@@ -619,7 +633,7 @@ class Handler(BaseHTTPRequestHandler):
                     raw = raw[:8000]
                 # сохраняем сразу с сырым текстом — ответ быстрый, без ожидания LLM
                 entry = store.add_diary_entry(uid, raw, raw)
-                # бережная чистка орфографии в фоне, потом подменяем текст
+                # в фоне: чистка орфографии + психологический отклик
                 eid = entry.get("id")
 
                 def _polish_bg(uid=uid, eid=eid, raw=raw):
@@ -627,12 +641,27 @@ class Handler(BaseHTTPRequestHandler):
                         clean = self._diary_polish(raw)
                         if clean and clean != raw and eid is not None:
                             store.update_diary_text(uid, eid, clean)
+                        fb = self._diary_feedback(clean if clean else raw)
+                        if fb and eid is not None:
+                            store.set_diary_feedback(uid, eid, fb)
                     except Exception as e:
-                        print(f"[diary] polish failed uid={uid} id={eid}: {e}", flush=True)
+                        print(f"[diary] bg failed uid={uid} id={eid}: {e}", flush=True)
 
                 threading.Thread(target=_polish_bg, daemon=True).start()
+                _maybe_recompile(uid)   # дневник — источник портрета, обновляем фоном
                 self._json(200, {"ok": True, "entry": entry,
                                  "entries": store.list_diary_entries(uid)}); return
+
+            if u.path == "/api/diary/update":
+                try:
+                    eid = int(body.get("id"))
+                except Exception:
+                    self._json(400, {"error": "bad id"}); return
+                text = (body.get("text") or "").strip()[:8000]
+                if not text:
+                    self._json(400, {"error": "empty"}); return
+                store.update_diary_text(uid, eid, text)
+                self._json(200, {"ok": True, "entries": store.list_diary_entries(uid)}); return
 
             if u.path == "/api/diary/delete":
                 try:

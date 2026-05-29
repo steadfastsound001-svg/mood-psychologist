@@ -129,7 +129,7 @@ COMPILE_PROMPT = """ты — психолог, который пишет чел�
 выдай только портрет."""
 
 
-def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: str) -> str:
+def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: str, diary: str = "") -> str:
     lines = []
     for qd in QUESTIONS:
         qid = qd["id"]
@@ -159,12 +159,16 @@ def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: s
         blob += f"\n\n[дополнительно о себе]\n{raw_info.strip()}"
     if (documents or "").strip():
         blob += f"\n\n[материалы клиента — досье]\n{documents.strip()[:50000]}"
+    if (diary or "").strip():
+        blob += f"\n\n[записи дневника — как человек живёт и что чувствует день за днём]\n{diary.strip()[:40000]}"
     return blob
 
 
-def compile_profile(answers: dict, raw_info: str = "", extra: dict | None = None, documents: str = "") -> str:
-    """answers: {question_id: value}. Возвращает клиентский портрет."""
-    blob = _answers_blob(answers, raw_info, extra, documents)
+def compile_profile(answers: dict, raw_info: str = "", extra: dict | None = None,
+                    documents: str = "", diary: str = "") -> str:
+    """answers: {question_id: value}. Возвращает клиентский портрет.
+    Аккумулирует ВСЕ источники: тесты + досье + дневник + что человек сам сказал."""
+    blob = _answers_blob(answers, raw_info, extra, documents, diary)
     resp = client.messages.create(
         max_tokens=2200,
         system=COMPILE_PROMPT,

@@ -47,6 +47,10 @@ function animateNum(el, target, dur = 900) {
   requestAnimationFrame(step);
 }
 
+// PWA: ловим событие установки как можно раньше (оно прилетает до initApp)
+let deferredInstall = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstall = e; });
+
 const TOKEN_KEY = "mood_token";
 const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
 const setToken = (t) => localStorage.setItem(TOKEN_KEY, t);
@@ -266,7 +270,9 @@ function initApp() {
       dh.setAttribute("aria-expanded", c.classList.contains("collapsed") ? "false" : "true");
     };
     $("tmClose").onclick = closeTest;
+    document.addEventListener("click", () => document.querySelectorAll(".diary-menu").forEach((m) => { m.hidden = true; }));
     setupThemes();
+    setupInstallPrompt();
     loadExtraTests();
   }
   switchView("chat");
@@ -374,7 +380,9 @@ async function saveDiaryEntry(text) {
     input.value = ""; input.style.height = "auto";
     hapticOk();
     toggleDiaryMode();
-    if (r.entries) renderDiary(r.entries);
+    if (r.entries) { saveDiaryCache(r.entries); renderDiary(r.entries); }
+    setTimeout(refreshDiaryQuietly, 6000);
+    setTimeout(refreshDiaryQuietly, 14000);
     switchView("diary");
   } catch (e) {
     input.placeholder = "ошибка сохранения";
@@ -383,14 +391,25 @@ async function saveDiaryEntry(text) {
 }
 
 /* ── вкладка дневника ── */
+const DIARY_KEY = () => "mood_diary_" + (window.__me?.id || "x");
+function loadDiaryCache() { try { return JSON.parse(localStorage.getItem(DIARY_KEY()) || "[]"); } catch (_) { return []; } }
+function saveDiaryCache(a) { try { localStorage.setItem(DIARY_KEY(), JSON.stringify((a || []).slice(0, 100))); } catch (_) {} }
+
 async function loadDiary() {
-  // настроение живёт здесь же
-  try { lastStats = await api("/api/stats"); renderPulse(lastStats); }
-  catch (_) { renderPulse(null); }
+  renderDiary(loadDiaryCache());                 // кэш мгновенно
+  try { lastStats = await api("/api/stats"); } catch (_) {}
+  renderPulse(lastStats);
   try {
     const r = await api("/api/diary");
-    renderDiary(r.entries || []);
-  } catch (_) { renderDiary([]); }
+    if (r.entries) { saveDiaryCache(r.entries); renderDiary(r.entries); }
+  } catch (_) {}
+}
+async function refreshDiaryQuietly() {           // незаметно подтягиваем отклик/чистку из фона
+  if ($("diaryView").hidden) return;
+  try {
+    const r = await api("/api/diary");
+    if (r.entries) { saveDiaryCache(r.entries); renderDiary(r.entries); }
+  } catch (_) {}
 }
 async function saveDiaryFromTab() {
   const input = $("diaryInput"), btn = $("diarySave");
@@ -403,7 +422,9 @@ async function saveDiaryFromTab() {
     $("diarySaved").hidden = false;
     hapticOk();
     setTimeout(() => { $("diarySaved").hidden = true; }, 2200);
-    if (r.entries) renderDiary(r.entries);
+    if (r.entries) { saveDiaryCache(r.entries); renderDiary(r.entries); }
+    setTimeout(refreshDiaryQuietly, 6000);       // отклик психолога приходит в фоне
+    setTimeout(refreshDiaryQuietly, 14000);
   } catch (e) {
     btn.textContent = "ошибка — ещё раз";
     setTimeout(() => { btn.textContent = "сохранить запись"; }, 2200);
@@ -412,6 +433,19 @@ async function saveDiaryFromTab() {
     btn.disabled = false; btn.textContent = "сохранить запись";
   }
 }
+
+/* символ настроения дня: mood_history (день → балл → значок пульса) */
+function moodSymbolForTs(ts) {
+  const hist = (lastStats && lastStats.mood_history) || [];
+  if (!hist.length) return "";
+  const day = Math.floor((ts || 0) / 86400);
+  const row = hist.find((h) => h.day === day);
+  if (!row) return "";
+  const idx = PULSE_SCORES.indexOf(row.score);
+  return idx >= 0 ? PULSE[idx].e : "";
+}
+
+let diaryEditId = null;
 function renderDiary(entries) {
   const box = $("diaryList");
   if (!box) return;
@@ -425,11 +459,55 @@ function renderDiary(entries) {
     el.className = "diary-entry";
     const d = new Date((e.ts || 0) * 1000);
     const date = isNaN(d) ? "" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
-    el.innerHTML = `<button class="diary-del" title="удалить">${ico("x")}</button>
-      <div class="diary-date">${date}</div>
-      <div class="diary-text"></div>`;
-    el.querySelector(".diary-text").textContent = e.text;
-    el.querySelector(".diary-del").onclick = () => delDiary(e.id);
+    const sym = moodSymbolForTs(e.ts);
+    const editing = diaryEditId === e.id;
+    el.innerHTML = `
+      <div class="diary-head">
+        <div class="diary-date">${sym ? `<span class="diary-mood">${sym}</span>` : ""}${date}</div>
+        <button class="diary-menu-btn" title="ещё">⋮</button>
+        <div class="diary-menu" hidden>
+          <button data-act="edit">редактировать</button>
+          <button data-act="del">удалить</button>
+        </div>
+      </div>
+      ${editing
+        ? `<textarea class="field area diary-edit"></textarea>
+           <div class="diary-edit-actions">
+             <button class="btn-ghost" data-act="cancel">отмена</button>
+             <button class="btn-primary" data-act="save">сохранить</button>
+           </div>`
+        : `<div class="diary-text"></div>${e.feedback
+            ? `<div class="diary-feedback"><span class="diary-fb-label">психолог</span><span class="diary-fb-text"></span></div>`
+            : ""}`}`;
+    if (editing) {
+      el.querySelector(".diary-edit").value = e.text;
+    } else {
+      el.querySelector(".diary-text").textContent = e.text;
+      if (e.feedback) el.querySelector(".diary-fb-text").textContent = e.feedback;
+    }
+    const menuBtn = el.querySelector(".diary-menu-btn");
+    const menu = el.querySelector(".diary-menu");
+    menuBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      document.querySelectorAll(".diary-menu").forEach((m) => { if (m !== menu) m.hidden = true; });
+      menu.hidden = !menu.hidden;
+      haptic();
+    };
+    menu.querySelector('[data-act="edit"]').onclick = () => { diaryEditId = e.id; renderDiary(entries); };
+    menu.querySelector('[data-act="del"]').onclick = () => delDiary(e.id);
+    if (editing) {
+      el.querySelector('[data-act="cancel"]').onclick = () => { diaryEditId = null; renderDiary(entries); };
+      el.querySelector('[data-act="save"]').onclick = async () => {
+        const val = el.querySelector(".diary-edit").value.trim();
+        if (!val) return;
+        diaryEditId = null;
+        try {
+          const r = await api("/api/diary/update", { method: "POST", body: { id: e.id, text: val } });
+          if (r.entries) { saveDiaryCache(r.entries); renderDiary(r.entries); }
+          hapticOk();
+        } catch (_) { renderDiary(entries); }
+      };
+    }
     box.appendChild(el);
   });
 }
@@ -437,6 +515,7 @@ async function delDiary(id) {
   haptic("medium");
   try {
     const r = await api("/api/diary/delete", { method: "POST", body: { id } });
+    if (r.entries) saveDiaryCache(r.entries);
     renderDiary(r.entries || []);
   } catch (_) {}
 }
@@ -457,6 +536,35 @@ function applyTheme(name) {
     tog.title = curTheme === "dark" ? "светлая тема" : "тёмная тема";
   }
 }
+/* ── предложение «добавить на домашний экран» (PWA) ── */
+function setupInstallPrompt() {
+  const banner = $("installBanner");
+  if (!banner) return;
+  const KEY = "mood_install_dismissed";
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  const inTG = !!(tg && tg.initData);
+  let dismissed = false; try { dismissed = localStorage.getItem(KEY) === "1"; } catch (_) {}
+  if (standalone || dismissed || inTG) return;          // уже апка / отклонил / внутри Telegram
+  const close = () => { banner.hidden = true; try { localStorage.setItem(KEY, "1"); } catch (_) {} };
+  $("installClose").onclick = close;
+  const reveal = () => { banner.hidden = false; };
+
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) {  // iOS: программного prompt нет — инструкция
+    $("installText").textContent = "добавь MOOD на экран «Домой»: «Поделиться» → «На экран Домой»";
+    $("installBtn").hidden = true;
+    setTimeout(reveal, 1500);
+    return;
+  }
+  $("installBtn").onclick = async () => {
+    if (!deferredInstall) { close(); return; }
+    deferredInstall.prompt();
+    try { await deferredInstall.userChoice; } catch (_) {}
+    deferredInstall = null; close();
+  };
+  if (deferredInstall) reveal();                          // событие уже прилетело
+  else window.addEventListener("beforeinstallprompt", reveal);
+}
+
 function setupThemes() {
   const saved = (() => { try { return localStorage.getItem(THEME_KEY); } catch (_) { return null; } })() || "dark";
   applyTheme(saved);
@@ -608,18 +716,22 @@ async function sendMessage() {
   let shown = 0;           // сколько символов уже показано (посимвольная доводка)
   let typing = false;
   const render = (s) => { agentEl.innerHTML = mdLite(s); };  // mdLite экранирует html (см. mdLite)
+  // автоскролл только если юзер у низа — иначе не мешаем листать вверх
+  const nearBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 90;
   // посимвольный вывод: показ догоняет буфер плавно, не зависит от рывков сети
   const typer = () => {
     if (shown < acc.length) {
+      const stick = nearBottom();
       shown += Math.max(1, Math.ceil((acc.length - shown) / 18));
       render(acc.slice(0, shown));
-      box.scrollTop = box.scrollHeight;
+      if (stick) box.scrollTop = box.scrollHeight;
       requestAnimationFrame(typer);
     } else { typing = false; }
   };
   const pump = () => { if (!typing) { typing = true; requestAnimationFrame(typer); } };
   const done = () => {
-    shown = acc.length; render(acc); box.scrollTop = box.scrollHeight;  // дописать остаток разом
+    const stick = nearBottom();
+    shown = acc.length; render(acc); if (stick) box.scrollTop = box.scrollHeight;  // дописать остаток
     agentEl.classList.remove("streaming");
     streaming = false; hapticOk();
     const f = loadChat();
@@ -671,22 +783,31 @@ async function sendMessage() {
 /* ── profile / MOOD ── */
 let lastStats = null;
 
+const PROF_KEY = () => "mood_portrait_" + (window.__me?.id || "x");
+function setPortrait(compiled) {
+  const c = (compiled || "").trim();
+  $("profCompiled").innerHTML = c ? mdLite(c) : "портрет ещё не собран — нажми кнопку ниже";
+  window.__portraitText = c;
+  // кнопка всегда доступна: «собрать» если пусто, «пересобрать» если есть
+  $("profCompile").textContent = c ? "пересобрать портрет" : "собрать портрет";
+  $("profCompile").hidden = false;
+  $("profExport").hidden = !c;
+}
 async function loadProfile() {
   $("profName").textContent = window.__me?.name || "—";
   $("profEmail").textContent = window.__me?.email || "—";
-  $("profCompiled").textContent = "загружаю…";
-  let compiled = "";
+  let cached = "";
+  try { cached = localStorage.getItem(PROF_KEY()) || ""; } catch (_) {}
+  setPortrait(cached || "");                       // мгновенно из кэша
+  if (!cached) $("profCompiled").textContent = "загружаю…";
   try {
     const me = await api("/api/me");
-    compiled = me.compiled || "";
-    $("profCompiled").innerHTML = compiled ? mdLite(compiled) : "портрет ещё не собран — нажми кнопку ниже";
+    const compiled = me.compiled || "";
+    try { localStorage.setItem(PROF_KEY(), compiled); } catch (_) {}
+    setPortrait(compiled);
   } catch (_) {
-    $("profCompiled").textContent = "—";
+    if (!cached) $("profCompiled").textContent = "—";
   }
-  // кнопка «собрать портрет» исчезает после сборки
-  window.__portraitText = compiled.trim();
-  $("profCompile").hidden = !!compiled.trim();
-  $("profExport").hidden = !compiled.trim();
   loadStats();
   loadDynMood();
   loadDocuments();
@@ -784,6 +905,14 @@ function renderMood(s) {
   fill.style.stroke = m >= 65 ? "#30d158" : m >= 45 ? "#ffd60a" : "#ff9f0a";
   animateNum($("moodNum"), m);
   $("moodCap").textContent = MOOD_WORD(m);
+  const chart = $("moodChart");
+  if (chart) {
+    const hist = s.mood_history || [];
+    const spark = sparkline(hist);
+    chart.innerHTML = spark
+      ? `<div class="mood-chart-cap">динамика · ${hist.length} ${plural(hist.length, "отметка", "отметки", "отметок")}</div>${spark}`
+      : "";
+  }
 }
 
 /* sparkline: SVG-полилиния по истории MOOD */
@@ -865,10 +994,8 @@ async function compilePortrait() {
   try {
     const r = await api("/api/profile/compile", { method: "POST", body: {}, timeout: 90000 });
     if (r.compiled) {
-      $("profCompiled").innerHTML = mdLite(r.compiled);
-      window.__portraitText = r.compiled.trim();
-      btn.hidden = true;
-      $("profExport").hidden = false;
+      try { localStorage.setItem(PROF_KEY(), r.compiled); } catch (_) {}
+      setPortrait(r.compiled);
     }
     hapticOk();
     loadStats();

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.mood.notes-sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/johny/Desktop/CLAUDE/psychologist-bot/tools/applenotes_sync.py</string>
+    <string>sync</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/johny/Desktop/CLAUDE/psychologist-bot</string>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/johny/Desktop/CLAUDE/psychologist-bot/tools/.notes_sync.log</string>
+  <key>StandardErrorPath</key><string>/Users/johny/Desktop/CLAUDE/psychologist-bot/tools/.notes_sync.log</string>
+</dict>
+</plist>

@@ -1407,3 +1407,67 @@ a:focus:not(:focus-visible),
   /* iOS Safari зумит страницу при фокусе на поле с font-size < 16px — держим ≥16px */
   .field, input, textarea, select { font-size: 16px; }
 }
+
+/* ═══════════ v33: дневник 2.0, график MOOD, PWA-баннер ═══════════ */
+
+/* монохромные значки везде (iOS любит подменять символы цветными эмодзи) */
+.pulse-e, .diary-mood { font-variant-emoji: text; }
+.pulse-e { width: 28px; text-align: center; }
+
+/* шапка записи: дата + значок настроения + меню ⋮ */
+.diary-head { display: flex; align-items: center; justify-content: space-between; position: relative; margin-bottom: 8px; }
+.diary-head .diary-date { margin-bottom: 0; display: flex; align-items: center; gap: 7px; }
+.diary-mood { font-size: 16px; line-height: 1; color: var(--accent); text-transform: none; }
+.diary-menu-btn {
+  background: none; border: none; color: var(--hint); cursor: pointer;
+  font-size: 22px; line-height: 1; padding: 0 6px; border-radius: 8px; flex-shrink: 0;
+}
+.diary-menu-btn:active { transform: scale(0.9); }
+.diary-menu {
+  position: absolute; top: 26px; right: 0; z-index: 20;
+  background: var(--surface-strong, var(--surface)); border: 1px solid var(--divider);
+  border-radius: 12px; padding: 4px; min-width: 150px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35); display: flex; flex-direction: column;
+}
+.diary-menu button {
+  background: none; border: none; color: var(--text); cursor: pointer;
+  text-align: left; padding: 9px 12px; border-radius: 8px; font-size: var(--t-footnote);
+}
+.diary-menu button:active { background: var(--grad-spectrum-soft); }
+.diary-menu [data-act="del"] { color: var(--ring-bad, #ff6b6b); }
+
+/* отклик психолога под записью */
+.diary-feedback {
+  margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--divider);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.diary-fb-label { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); }
+.diary-fb-text { font-size: var(--t-footnote); line-height: 1.5; color: var(--hint); font-style: italic; }
+
+/* редактирование записи */
+.diary-edit { margin-top: 4px; }
+.diary-edit-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+.diary-edit-actions button { flex: 0 0 auto; padding: 8px 18px; }
+
+/* график в карте MOOD */
+.mood-chart { margin-top: 18px; }
+.mood-chart-cap { font-size: var(--t-footnote); color: var(--hint); margin-bottom: 6px; text-align: left; }
+
+/* баннер «добавить на домашний экран» */
+.install-banner {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 700;
+  width: min(440px, calc(100vw - 24px));
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-strong, var(--surface)); border: 1px solid var(--border);
+  border-radius: 16px; padding: 12px 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.4);
+}
+.install-text { flex: 1; font-size: var(--t-footnote); line-height: 1.4; color: var(--text); }
+.install-btn {
+  flex-shrink: 0; background: var(--accent); color: #fff; border: none;
+  border-radius: 10px; padding: 8px 14px; font-size: var(--t-footnote); font-weight: 700; cursor: pointer;
+}
+.install-close {
+  flex-shrink: 0; background: none; border: none; color: var(--hint);
+  cursor: pointer; font-size: 16px; line-height: 1; padding: 4px 6px;
+}

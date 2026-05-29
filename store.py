@@ -149,6 +149,11 @@ def init_db() -> None:
         execute("ALTER TABLE profiles ADD COLUMN insights_at REAL DEFAULT 0")
     except Exception:
         pass
+    # миграция: короткий психологический отклик на запись дневника.
+    try:
+        execute("ALTER TABLE diary_entries ADD COLUMN feedback TEXT DEFAULT ''")
+    except Exception:
+        pass
 
 
 # ───────────── auth ─────────────
@@ -393,10 +398,10 @@ def set_insights(user_id: int, text: str) -> None:
 
 def list_diary_entries(user_id: int, limit: int = 100) -> list[dict]:
     rows = query(
-        "SELECT id, text, ts FROM diary_entries WHERE user_id=? ORDER BY ts DESC LIMIT ?",
+        "SELECT id, text, ts, feedback FROM diary_entries WHERE user_id=? ORDER BY ts DESC LIMIT ?",
         (user_id, limit),
     )
-    return [{"id": r["id"], "text": r["text"], "ts": r["ts"]} for r in rows]
+    return [{"id": r["id"], "text": r["text"], "ts": r["ts"], "feedback": r.get("feedback") or ""} for r in rows]
 
 
 def delete_diary_entry(user_id: int, entry_id: int) -> None:
@@ -405,6 +410,27 @@ def delete_diary_entry(user_id: int, entry_id: int) -> None:
 
 def update_diary_text(user_id: int, entry_id: int, text: str) -> None:
     execute("UPDATE diary_entries SET text=? WHERE id=? AND user_id=?", (text, entry_id, user_id))
+
+
+def set_diary_feedback(user_id: int, entry_id: int, feedback: str) -> None:
+    execute("UPDATE diary_entries SET feedback=? WHERE id=? AND user_id=?", (feedback, entry_id, user_id))
+
+
+def diary_text_blob(user_id: int, limit: int = 200, cap: int = 40000) -> str:
+    """Все записи дневника (от старых к новым) одним текстом — для сборки портрета."""
+    rows = query(
+        "SELECT text, ts FROM diary_entries WHERE user_id=? ORDER BY ts DESC LIMIT ?",
+        (user_id, limit),
+    )
+    rows = list(reversed(rows))
+    out, total = [], 0
+    for r in rows:
+        chunk = f"— {r['text']}"
+        if total + len(chunk) > cap:
+            break
+        out.append(chunk)
+        total += len(chunk)
+    return "\n".join(out)
 
 
 # ───────────── stats (сеансы / возраст аккаунта) ─────────────
