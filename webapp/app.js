@@ -639,17 +639,21 @@ async function loadProfile() {
 }
 
 /* динамичный MOOD — настрой за 10 дней по дневнику */
-async function loadDynMood() {
+async function loadDynMood(tries = 0) {
   const card = $("dynMoodCard");
   if (!card) return;
   let d;
-  try { d = await api("/api/v2/dynamic-mood"); } catch (_) { d = null; }
+  try { d = await api("/api/v2/dynamic-mood", { timeout: 15000 }); } catch (_) { d = null; }
   const num = $("dynMoodNum"), bar = $("dynMoodBar"), note = $("dynMoodNote"), foot = $("dynMoodFoot");
   if (!d || d.score == null) {
     num.textContent = "—";
     bar.style.width = "0%";
     note.textContent = (d && d.note) || "веди дневник — настрой посчитается за 10 дней";
     foot.textContent = "";
+    // пока считается в фоне — мягко перепроверяем, пока пользователь на вкладке
+    if (d && d.pending && tries < 5) {
+      setTimeout(() => { if (!$("profileView").hidden) loadDynMood(tries + 1); }, 12000);
+    }
     return;
   }
   animateNum(num, d.score);

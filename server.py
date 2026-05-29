@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode
@@ -36,6 +37,34 @@ PULSE_SCORES = [12, 32, 55, 78, 95]  # пульс 1..5 → MOOD-шкала 0-100
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip("/")
+
+
+_DYN_COMPUTING = set()   # uid'ы, для которых динамичный MOOD сейчас считается в фоне
+_DYN_LOCK = threading.Lock()
+
+
+def _dyn_mood_compute(uid, entries):
+    """Фоновый подсчёт динамичного MOOD по записям дневника. Кэширует результат."""
+    try:
+        blob = "\n".join(f"— {e['text'][:600]}" for e in entries[-30:])
+        sys = ("ты психолог. на входе — записи дневника человека за последние 10 дней. "
+               "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично) "
+               "и дай одну короткую тёплую строку-наблюдение (на «ты», строчные, без воды). "
+               "верни СТРОГО JSON: {\"score\": <int 0-100>, \"note\": \"<одна строка>\"}")
+        resp = client.messages.create(
+            system=sys, messages=[{"role": "user", "content": blob}],
+            max_tokens=200, task="fast",
+        )
+        raw = resp.content[0].text.strip()
+        m = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+        score = max(0, min(100, int(m.get("score"))))
+        note = str(m.get("note") or "").strip()[:160]
+        store.set_dyn_mood(uid, {"score": score, "note": note, "n": len(entries), "ts": time.time()})
+    except Exception as e:
+        print(f"[dyn_mood] compute fail uid={uid}: {e}", flush=True)
+    finally:
+        with _DYN_LOCK:
+            _DYN_COMPUTING.discard(uid)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -224,13 +253,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return f"не удалось собрать: {e}"
 
-    def _dynamic_mood(self, uid, force=False):
-        """Настрой за последние 10 дней по записям дневника. Пересчёт раз в 10 дней (lazy)."""
-        import time as _t
-        now = _t.time()
+    def _dynamic_mood(self, uid):
+        """Настрой за 10 дней по дневнику. НЕ блокирует: LLM-подсчёт уходит в фон,
+        ответ отдаётся сразу (кэш / pending). Пересчёт раз в 10 дней."""
+        now = time.time()
         win = DYN_MOOD_DAYS * 86400
         cached = store.get_dyn_mood(uid)
-        if cached and not force and (now - cached.get("ts", 0)) < win:
+        if cached and (now - cached.get("ts", 0)) < win:
             left = max(0, DYN_MOOD_DAYS - int((now - cached.get("ts", 0)) // 86400))
             return {**cached, "days_left": left}
         entries = store.diary_since(uid, now - win)
@@ -238,29 +267,18 @@ class Handler(BaseHTTPRequestHandler):
             if cached:
                 return {**cached, "days_left": 0, "stale": True}
             return {"score": None, "note": "веди дневник — настрой посчитается по записям за 10 дней",
-                    "n": 0, "ts": now, "days_left": DYN_MOOD_DAYS, "pending": True}
-        blob = "\n".join(f"— {e['text'][:600]}" for e in entries[-30:])
-        sys = ("ты психолог. на входе — записи дневника человека за последние 10 дней. "
-               "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично) "
-               "и дай одну короткую тёплую строку-наблюдение (на «ты», строчные, без воды). "
-               "верни СТРОГО JSON: {\"score\": <int 0-100>, \"note\": \"<одна строка>\"}")
-        try:
-            resp = client.messages.create(
-                system=sys, messages=[{"role": "user", "content": blob}],
-                max_tokens=200, task="fast",
-            )
-            raw = resp.content[0].text.strip()
-            m = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-            score = max(0, min(100, int(m.get("score"))))
-            note = str(m.get("note") or "").strip()[:160]
-            data = {"score": score, "note": note, "n": len(entries), "ts": now}
-            store.set_dyn_mood(uid, data)
-            return {**data, "days_left": DYN_MOOD_DAYS}
-        except Exception as e:
-            print("dyn_mood fail:", e, flush=True)
-            if cached:
-                return {**cached, "days_left": 0, "stale": True}
-            return {"score": None, "note": "не удалось посчитать — попробуй позже", "n": len(entries), "ts": now, "days_left": DYN_MOOD_DAYS}
+                    "n": 0, "days_left": DYN_MOOD_DAYS}
+        # есть записи, но кэш пуст/устарел → считаем в фоне, ответ не ждёт LLM
+        with _DYN_LOCK:
+            fresh = uid not in _DYN_COMPUTING
+            if fresh:
+                _DYN_COMPUTING.add(uid)
+        if fresh:
+            threading.Thread(target=_dyn_mood_compute, args=(uid, entries), daemon=True).start()
+        if cached:
+            return {**cached, "days_left": 0, "stale": True}
+        return {"score": None, "note": "считаю настрой по дневнику — загляни через минуту",
+                "n": len(entries), "days_left": DYN_MOOD_DAYS, "pending": True}
 
     def _diary_polish(self, raw):
         """Бот бережно вычищает запись дневника: орфография, пунктуация, абзацы.
