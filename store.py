@@ -121,6 +121,9 @@ _SCHEMA = [
     """CREATE TABLE IF NOT EXISTS mood_logs(
       user_id INTEGER NOT NULL, day INTEGER NOT NULL, score INTEGER NOT NULL,
       source TEXT DEFAULT 'pulse', ts REAL, PRIMARY KEY(user_id, day))""",
+    """CREATE TABLE IF NOT EXISTS diary_entries(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+      text TEXT NOT NULL, raw TEXT DEFAULT '', ts REAL)""",
 ]
 
 
@@ -314,6 +317,36 @@ def _streak_from_days(days: set[int]) -> int:
         n += 1
         cur -= 1
     return n
+
+
+# ───────────── дневник ─────────────
+
+def add_diary_entry(user_id: int, text: str, raw: str = "") -> dict:
+    ts = time.time()
+    eid = execute(
+        "INSERT INTO diary_entries(user_id, text, raw, ts) VALUES(?,?,?,?)",
+        (user_id, text, raw, ts),
+    )
+    if eid is None:
+        row = query("SELECT id FROM diary_entries WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
+        eid = row[0]["id"] if row else None
+    return {"id": eid, "text": text, "ts": ts}
+
+
+def list_diary_entries(user_id: int, limit: int = 100) -> list[dict]:
+    rows = query(
+        "SELECT id, text, ts FROM diary_entries WHERE user_id=? ORDER BY ts DESC LIMIT ?",
+        (user_id, limit),
+    )
+    return [{"id": r["id"], "text": r["text"], "ts": r["ts"]} for r in rows]
+
+
+def delete_diary_entry(user_id: int, entry_id: int) -> None:
+    execute("DELETE FROM diary_entries WHERE id=? AND user_id=?", (entry_id, user_id))
+
+
+def update_diary_text(user_id: int, entry_id: int, text: str) -> None:
+    execute("UPDATE diary_entries SET text=? WHERE id=? AND user_id=?", (text, entry_id, user_id))
 
 
 # ───────────── stats (сеансы / возраст аккаунта) ─────────────

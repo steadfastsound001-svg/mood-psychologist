@@ -222,6 +222,23 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return f"не удалось собрать: {e}"
 
+    def _diary_polish(self, raw):
+        """Бот бережно вычищает запись дневника: орфография, пунктуация, абзацы.
+        Смысл, тон и голос автора не меняет. При сбое — возвращает исходник."""
+        sys = ("ты бережный редактор личного дневника. вычисти текст: орфография, пунктуация, "
+               "заглавные буквы, разбивка на абзацы. НЕ меняй смысл, факты, стиль и голос автора, "
+               "не добавляй и не выкидывай мысли, не комментируй. верни ТОЛЬКО отредактированный текст "
+               "от первого лица, без markdown и без кавычек вокруг.")
+        try:
+            resp = client.messages.create(
+                system=sys, messages=[{"role": "user", "content": raw}],
+                max_tokens=1200, task="fast",
+            )
+            out = resp.content[0].text.strip()
+            return out or raw
+        except Exception:
+            return raw
+
     # ── GET ──
     def do_GET(self):
         u = urlparse(self.path)
@@ -262,6 +279,11 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self._json(401, {"error": "unauthorized"}); return
             self._json(200, {"text": self._opener(user["id"])}); return
+        if p == "/api/diary":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            self._json(200, {"entries": store.list_diary_entries(user["id"])}); return
         # статика
         rel = p.lstrip("/") or "index.html"
         target = (WEBAPP_DIR / rel).resolve()
@@ -404,6 +426,37 @@ class Handler(BaseHTTPRequestHandler):
 
             if u.path == "/api/v2/weekly":
                 self._json(200, {"text": self._weekly(uid)}); return
+
+            if u.path == "/api/diary":
+                raw = (body.get("text") or "").strip()
+                if not raw:
+                    self._json(400, {"error": "empty"}); return
+                if len(raw) > 8000:
+                    raw = raw[:8000]
+                # сохраняем сразу с сырым текстом — ответ быстрый, без ожидания LLM
+                entry = store.add_diary_entry(uid, raw, raw)
+                # бережная чистка орфографии в фоне, потом подменяем текст
+                eid = entry.get("id")
+
+                def _polish_bg(uid=uid, eid=eid, raw=raw):
+                    try:
+                        clean = self._diary_polish(raw)
+                        if clean and clean != raw and eid is not None:
+                            store.update_diary_text(uid, eid, clean)
+                    except Exception as e:
+                        print(f"[diary] polish failed uid={uid} id={eid}: {e}", flush=True)
+
+                threading.Thread(target=_polish_bg, daemon=True).start()
+                self._json(200, {"ok": True, "entry": entry,
+                                 "entries": store.list_diary_entries(uid)}); return
+
+            if u.path == "/api/diary/delete":
+                try:
+                    eid = int(body.get("id"))
+                except Exception:
+                    self._json(400, {"error": "bad id"}); return
+                store.delete_diary_entry(uid, eid)
+                self._json(200, {"ok": True, "entries": store.list_diary_entries(uid)}); return
 
             self._json(404, {"error": "not found"})
         except Exception as e:

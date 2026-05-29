@@ -116,6 +116,15 @@ function initAuth() {
   api("/api/auth/google/enabled", { auth: false }).then((r) => {
     if (r.enabled) { $("googleBtn").hidden = false; $("authOr").hidden = false; }
   }).catch(() => {});
+  // Google блокирует OAuth во встроенных webview — открываем во внешнем браузере
+  const gbtn = $("googleBtn");
+  if (gbtn) gbtn.onclick = (e) => {
+    const url = new URL(gbtn.getAttribute("href"), location.origin).href;
+    if (tg && typeof tg.openLink === "function") {
+      e.preventDefault();
+      tg.openLink(url, { try_instant_view: false });
+    }
+  };
 }
 
 async function doAuth() {
@@ -230,6 +239,7 @@ function initApp() {
     $("fileBtn").onclick = () => $("fileInput").click();
     $("fileInput").onchange = (e) => uploadFiles(e.target.files);
     $("tmClose").onclick = closeTest;
+    setupThemes();
     loadExtraTests();
   }
   switchView("chat");
@@ -239,8 +249,10 @@ function switchView(view) {
   document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   $("chatView").hidden = view !== "chat";
   $("profileView").hidden = view !== "profile";
+  $("diaryView").hidden = view !== "diary";
   if (view === "profile") loadProfile();
   if (view === "chat") chatRender();
+  if (view === "diary") loadDiary();
 }
 
 /* ── chat ── */
@@ -296,6 +308,88 @@ function setupChat() {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!send.disabled) sendMessage(); } });
   send.addEventListener("click", sendMessage);
   setupVoice(input, upd);
+  const db = $("chatDiaryBtn");
+  if (db) db.onclick = toggleDiaryMode;
+}
+
+/* ── режим записи в дневник прямо из чата ── */
+let diaryMode = false;
+function toggleDiaryMode() {
+  diaryMode = !diaryMode;
+  haptic("medium");
+  const btn = $("chatDiaryBtn"), bar = $("chatInputBar"), hint = $("diaryHint"), input = $("chatInput");
+  btn.classList.toggle("on", diaryMode);
+  bar.classList.toggle("diary-mode", diaryMode);
+  hint.hidden = !diaryMode;
+  input.placeholder = diaryMode ? "пиши запись в дневник…" : "напиши что внутри…";
+  input.focus();
+}
+async function saveDiaryEntry(text) {
+  const input = $("chatInput"), send = $("chatSend");
+  send.disabled = true; input.placeholder = "сохраняю…";
+  try {
+    const r = await api("/api/diary", { method: "POST", body: { text } });
+    input.value = ""; input.style.height = "auto";
+    hapticOk();
+    toggleDiaryMode();
+    if (r.entries) renderDiary(r.entries);
+    switchView("diary");
+  } catch (e) {
+    input.placeholder = "ошибка сохранения";
+    setTimeout(() => { input.placeholder = "пиши запись в дневник…"; }, 2500);
+  } finally { send.disabled = !input.value.trim(); }
+}
+
+/* ── вкладка дневника ── */
+async function loadDiary() {
+  try {
+    const r = await api("/api/diary");
+    renderDiary(r.entries || []);
+  } catch (_) { renderDiary([]); }
+}
+function renderDiary(entries) {
+  const box = $("diaryList");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!entries.length) {
+    box.innerHTML = '<div class="diary-empty">пока пусто. в чате нажми ❧ и напиши первую запись</div>';
+    return;
+  }
+  entries.forEach((e) => {
+    const el = document.createElement("div");
+    el.className = "diary-entry";
+    const d = new Date((e.ts || 0) * 1000);
+    const date = isNaN(d) ? "" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+    el.innerHTML = `<button class="diary-del" title="удалить">✕</button>
+      <div class="diary-date">${date}</div>
+      <div class="diary-text"></div>`;
+    el.querySelector(".diary-text").textContent = e.text;
+    el.querySelector(".diary-del").onclick = () => delDiary(e.id);
+    box.appendChild(el);
+  });
+}
+async function delDiary(id) {
+  haptic("medium");
+  try {
+    const r = await api("/api/diary/delete", { method: "POST", body: { id } });
+    renderDiary(r.entries || []);
+  } catch (_) {}
+}
+
+/* ── темы ── */
+const THEME_KEY = "mood_theme";
+function applyTheme(name) {
+  if (name === "diary") document.documentElement.setAttribute("data-theme", "diary");
+  else document.documentElement.removeAttribute("data-theme");
+  try { localStorage.setItem(THEME_KEY, name); } catch (_) {}
+  document.querySelectorAll(".theme-opt").forEach((b) => b.classList.toggle("sel", b.dataset.theme === name));
+}
+function setupThemes() {
+  const saved = (() => { try { return localStorage.getItem(THEME_KEY); } catch (_) { return null; } })() || "night";
+  applyTheme(saved);
+  document.querySelectorAll(".theme-opt").forEach((b) => {
+    b.onclick = () => { haptic("medium"); applyTheme(b.dataset.theme); };
+  });
 }
 
 /* ── голосовой ввод: запись → распознавание (Groq Whisper на сервере) ── */
@@ -371,6 +465,7 @@ async function sendMessage() {
   const input = $("chatInput");
   const text = input.value.trim();
   if (!text) return;
+  if (diaryMode) { saveDiaryEntry(text); return; }
   streaming = true; haptic("medium");
   const h = loadChat();
   h.push({ role: "user", text });
@@ -452,7 +547,6 @@ async function loadStats() {
   renderMood(lastStats);
   renderPulse(lastStats);
   renderTests(lastStats);
-  renderAch(lastStats);
   renderAnalytics(lastStats);
   // итоги недели открываются после 3 сеансов
   if ($("weeklyCard")) $("weeklyCard").hidden = !(lastStats && lastStats.sessions >= 3);
@@ -460,11 +554,11 @@ async function loadStats() {
 
 /* ── пульс настроения ── */
 const PULSE = [
-  { e: "😞", l: "тяжело" },
-  { e: "😕", l: "так себе" },
-  { e: "😐", l: "норм" },
-  { e: "🙂", l: "хорошо" },
-  { e: "😄", l: "отлично" },
+  { e: "○", l: "тяжело" },
+  { e: "◔", l: "так себе" },
+  { e: "◑", l: "норм" },
+  { e: "◕", l: "хорошо" },
+  { e: "●", l: "отлично" },
 ];
 const PULSE_SCORES = [12, 32, 55, 78, 95]; // зеркало server.py
 function renderPulse(s) {
@@ -544,20 +638,8 @@ function renderTests(s) {
     const done = s && s.tests && s.tests[t.id];
     const el = document.createElement("button");
     el.className = "test-item" + (done ? " done" : "");
-    el.innerHTML = `<span class="test-emoji">${t.emoji}</span><span class="test-title">${t.title}</span><span class="test-state">${done ? "✓ пройден" : "пройти →"}</span>`;
+    el.innerHTML = `<span class="test-emoji">${done ? "◆" : "◇"}</span><span class="test-title">${t.title}</span><span class="test-state">${done ? "пройден" : "пройти →"}</span>`;
     el.onclick = () => { haptic(); openTest(t); };
-    box.appendChild(el);
-  });
-}
-
-function renderAch(s) {
-  const box = $("achList");
-  box.innerHTML = "";
-  const list = (s && s.achievements) || [];
-  list.forEach((a) => {
-    const el = document.createElement("div");
-    el.className = "ach" + (a.got ? " got" : "");
-    el.innerHTML = `<span class="ach-ico">${a.got ? a.icon : "🔒"}</span><span class="ach-lbl">${a.label}</span>`;
     box.appendChild(el);
   });
 }
@@ -730,7 +812,7 @@ async function tmNext() {
   hapticOk();
   try {
     const r = await api("/api/tests/submit", { method: "POST", body: { test_id: tid, answers: tmAnswers } });
-    if (r.stats) { lastStats = r.stats; renderMood(r.stats); renderTests(r.stats); renderAch(r.stats); renderAnalytics(r.stats); }
+    if (r.stats) { lastStats = r.stats; renderMood(r.stats); renderTests(r.stats); renderAnalytics(r.stats); }
   } catch (e) { console.warn("test submit:", e); }
 }
 
