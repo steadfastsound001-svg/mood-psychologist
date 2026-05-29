@@ -30,7 +30,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=26">
+<link rel="stylesheet" href="/style.css?v=27">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -53,22 +53,10 @@
     <div class="auth-title">MOOD</div>
     <div class="auth-sub">персональный психолог</div>
 
-    <input class="field" id="authName" type="text" placeholder="имя" autocomplete="name" hidden>
-    <input class="field" id="authEmail" type="email" placeholder="email" autocomplete="email" autocapitalize="off">
-    <input class="field" id="authPass" type="password" placeholder="пароль" autocomplete="current-password">
-
-    <button class="btn-primary" id="authSubmit">войти</button>
-    <div class="auth-error" id="authError" hidden></div>
-
-    <div class="auth-or" id="authOr" hidden><span>или</span></div>
-    <a class="btn-google" id="googleBtn" href="/api/auth/google" hidden>
+    <a class="btn-google" id="googleBtn" href="/api/auth/google">
       <span class="g-icon">G</span> войти через Google
     </a>
-
-    <div class="auth-switch">
-      <span id="authSwitchText">нет аккаунта?</span>
-      <button class="link" id="authSwitchBtn">создать</button>
-    </div>
+    <div class="auth-error" id="authError" hidden></div>
   </div>
 </div>
 
@@ -86,6 +74,7 @@
     <button class="btn-ghost" id="obBack" hidden>назад</button>
     <button class="btn-primary" id="obNext">дальше</button>
   </div>
+  <button class="link onboard-skip" id="obSkip">пропустить — пройду потом</button>
 </div>
 
 <!-- ───────── APP ───────── -->
@@ -105,9 +94,11 @@
       <div class="composer-actions">
         <div class="composer-group">
           <button class="composer-btn" id="chatDiaryBtn" data-ico="feather" title="запись в дневник"></button>
-          <button class="composer-btn" id="chatMic" data-ico="mic" title="голосом" hidden></button>
         </div>
-        <button class="composer-send" id="chatSend" data-ico="arrow-up" title="отправить" disabled></button>
+        <div class="composer-group">
+          <button class="composer-btn" id="chatMic" data-ico="mic" title="голосом" hidden></button>
+          <button class="composer-send" id="chatSend" data-ico="arrow-up" title="отправить" disabled></button>
+        </div>
       </div>
     </div>
   </div>
@@ -132,6 +123,20 @@
         </div>
         <div class="mood-cap" id="moodCap"></div>
       </div>
+    </section>
+
+    <!-- динамичный MOOD (настрой за 10 дней по дневнику) -->
+    <section class="card dynmood-card" id="dynMoodCard">
+      <h3>настрой за 10 дней</h3>
+      <div class="card-note">психолог читает твой дневник и обновляет раз в 10 дней</div>
+      <div class="dynmood-row">
+        <div class="dynmood-num" id="dynMoodNum">—</div>
+        <div class="dynmood-side">
+          <div class="dynmood-bar"><div class="dynmood-bar-fill" id="dynMoodBar"></div></div>
+          <div class="dynmood-note" id="dynMoodNote">считаю…</div>
+        </div>
+      </div>
+      <div class="dynmood-foot" id="dynMoodFoot"></div>
     </section>
 
     <!-- портрет -->
@@ -257,6 +262,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=26"></script>
+<script src="/app.js?v=27"></script>
 </body>
 </html>

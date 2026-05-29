@@ -1347,3 +1347,29 @@ a:focus:not(:focus-visible),
 /* ── дневник: заголовок секции, видимая кнопка удаления ── */
 .diary-section-label { font-size: var(--t-caption); color: var(--hint); letter-spacing: 1px; text-transform: uppercase; margin: 24px 0 12px; }
 .diary-del { opacity: 0.5; }
+
+/* ═══════════ v27: динамичный MOOD, skip онбординга ═══════════ */
+.dynmood-row { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
+.dynmood-num {
+  font-family: var(--font-display); font-size: 46px; font-weight: 700;
+  line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 72px;
+}
+.dynmood-side { flex: 1; }
+.dynmood-bar {
+  height: 8px; border-radius: 6px; background: var(--surface-strong);
+  overflow: hidden; margin-bottom: 8px;
+}
+.dynmood-bar-fill {
+  height: 100%; width: 0%; border-radius: 6px; background: var(--accent);
+  transition: width 0.9s cubic-bezier(0.22,1,0.36,1), background 0.4s;
+}
+.dynmood-note { font-size: var(--t-callout); line-height: 1.45; color: var(--text); }
+.dynmood-foot { margin-top: 12px; font-size: var(--t-caption); color: var(--hint); }
+
+.onboard-skip {
+  display: block; margin: 18px auto 0; padding: 8px;
+  background: none; border: none; color: var(--hint);
+  font-family: inherit; font-size: var(--t-footnote); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+@media (hover: hover) { .onboard-skip:hover { color: var(--text); } }

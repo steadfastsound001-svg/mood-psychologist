@@ -120,60 +120,18 @@ async function boot() {
   }
 }
 
-/* ───────── AUTH ───────── */
-let authMode = "login"; // login | register
+/* ───────── AUTH (только Google) ───────── */
 function initAuth() {
-  const submit = $("authSubmit");
-  const switchBtn = $("authSwitchBtn");
-  const setMode = (m) => {
-    authMode = m;
-    $("authName").hidden = m !== "register";
-    submit.textContent = m === "login" ? "войти" : "создать аккаунт";
-    $("authSwitchText").textContent = m === "login" ? "нет аккаунта?" : "уже есть аккаунт?";
-    switchBtn.textContent = m === "login" ? "создать" : "войти";
-    $("authError").hidden = true;
-  };
-  switchBtn.onclick = () => { haptic(); setMode(authMode === "login" ? "register" : "login"); };
-  submit.onclick = doAuth;
-  $("authPass").addEventListener("keydown", (e) => { if (e.key === "Enter") doAuth(); });
-  setMode("login");
-  // показать кнопку Google если настроен
-  api("/api/auth/google/enabled", { auth: false }).then((r) => {
-    if (r.enabled) { $("googleBtn").hidden = false; $("authOr").hidden = false; }
-  }).catch(() => {});
-  // Google блокирует OAuth во встроенных webview — открываем во внешнем браузере
   const gbtn = $("googleBtn");
-  if (gbtn) gbtn.onclick = (e) => {
+  if (!gbtn) return;
+  // Google блокирует OAuth во встроенных webview — открываем во внешнем браузере
+  gbtn.onclick = (e) => {
     const url = new URL(gbtn.getAttribute("href"), location.origin).href;
     if (tg && typeof tg.openLink === "function") {
       e.preventDefault();
       tg.openLink(url, { try_instant_view: false });
     }
   };
-}
-
-async function doAuth() {
-  const email = $("authEmail").value.trim();
-  const pass = $("authPass").value;
-  const name = $("authName").value.trim();
-  const err = $("authError");
-  err.hidden = true;
-  if (!email || pass.length < 4) { err.textContent = "нужен email и пароль от 4 символов"; err.hidden = false; return; }
-  $("authSubmit").disabled = true;
-  try {
-    const path = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-    const r = await api(path, { method: "POST", auth: false, body: { email, password: pass, name } });
-    setToken(r.token);
-    window.__me = r.user;
-    hapticOk();
-    if (authMode === "register" || !r.onboarded) { startOnboarding(); show("onboardScreen"); }
-    else { initApp(); show("app"); }
-  } catch (e) {
-    err.textContent = e.message;
-    err.hidden = false;
-  } finally {
-    $("authSubmit").disabled = false;
-  }
 }
 
 /* ───────── ONBOARDING ───────── */
@@ -190,7 +148,26 @@ async function startOnboarding() {
   } catch (_) { obQuestions = []; }
   $("obBack").onclick = () => { if (obIndex > 0) { obIndex--; renderQuestion(); } };
   $("obNext").onclick = obNext;
+  const skip = $("obSkip");
+  if (skip) skip.onclick = skipOnboarding;
   renderQuestion();
+}
+
+/* пропустить первичный тест — входим в приложение, тест остаётся доступным в профиле */
+function skipOnboarding() {
+  haptic("medium");
+  try {
+    api("/api/onboarding/submit", { method: "POST", body: { answers: {}, raw_info: "" } }).catch(() => {});
+  } catch (_) {}
+  try { initApp(); } catch (_) {}
+  show("app");
+}
+
+/* перезапуск первичного теста из профиля (когда пропустил) */
+function startOnboardingAgain() {
+  haptic("medium");
+  startOnboarding();
+  show("onboardScreen");
 }
 
 function renderQuestion() {
@@ -637,6 +614,7 @@ let lastStats = null;
 async function loadProfile() {
   $("profName").textContent = window.__me?.name || "—";
   $("profEmail").textContent = window.__me?.email || "—";
+  $("profCompiled").textContent = "загружаю…";
   let compiled = "";
   try {
     const me = await api("/api/me");
@@ -650,7 +628,30 @@ async function loadProfile() {
   $("profCompile").hidden = !!compiled.trim();
   $("profExport").hidden = !compiled.trim();
   loadStats();
+  loadDynMood();
   loadDocuments();
+}
+
+/* динамичный MOOD — настрой за 10 дней по дневнику */
+async function loadDynMood() {
+  const card = $("dynMoodCard");
+  if (!card) return;
+  let d;
+  try { d = await api("/api/v2/dynamic-mood"); } catch (_) { d = null; }
+  const num = $("dynMoodNum"), bar = $("dynMoodBar"), note = $("dynMoodNote"), foot = $("dynMoodFoot");
+  if (!d || d.score == null) {
+    num.textContent = "—";
+    bar.style.width = "0%";
+    note.textContent = (d && d.note) || "веди дневник — настрой посчитается за 10 дней";
+    foot.textContent = "";
+    return;
+  }
+  animateNum(num, d.score);
+  bar.style.width = d.score + "%";
+  bar.style.background = d.score >= 65 ? "#30d158" : d.score >= 45 ? "#ffd60a" : "#ff9f0a";
+  note.textContent = d.note || "";
+  const left = d.days_left || 0;
+  foot.textContent = `по ${d.n || 0} ${plural(d.n || 0, "записи", "записям", "записям")} · обновится через ${left} ${plural(left, "день", "дня", "дней")}`;
 }
 
 async function loadStats() {
@@ -745,7 +746,14 @@ function sparkline(hist) {
 function renderTests(s) {
   const box = $("testsList");
   box.innerHTML = "";
-  if (!extraTests.length) { box.textContent = "—"; return; }
+  // первичный тест: если пропущен — даём пройти отсюда в любой момент
+  const obDone = !!(s && s.onboard_test_done);
+  const ob = document.createElement("button");
+  ob.className = "test-item" + (obDone ? " done" : "");
+  ob.innerHTML = `<span class="test-emoji">${obDone ? "◆" : "◇"}</span><span class="test-title">первичный тест о тебе</span><span class="test-state">${obDone ? "пройден" : "пройти →"}</span>`;
+  ob.onclick = () => { haptic(); startOnboardingAgain(); };
+  box.appendChild(ob);
+  if (!extraTests.length) return;
   extraTests.forEach((t) => {
     const done = s && s.tests && s.tests[t.id];
     const el = document.createElement("button");

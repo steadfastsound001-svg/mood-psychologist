@@ -135,6 +135,11 @@ def init_db() -> None:
         execute("ALTER TABLE profiles ADD COLUMN extra_tests TEXT DEFAULT ''")
     except Exception:
         pass
+    # миграция: динамичный MOOD (настрой за 10 дней из дневника) — кэш JSON.
+    try:
+        execute("ALTER TABLE profiles ADD COLUMN dyn_mood TEXT DEFAULT ''")
+    except Exception:
+        pass
 
 
 # ───────────── auth ─────────────
@@ -331,6 +336,32 @@ def add_diary_entry(user_id: int, text: str, raw: str = "") -> dict:
         row = query("SELECT id FROM diary_entries WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
         eid = row[0]["id"] if row else None
     return {"id": eid, "text": text, "ts": ts}
+
+
+def diary_since(user_id: int, since_ts: float) -> list[dict]:
+    """Записи дневника за период (ts >= since_ts), от старых к новым."""
+    rows = query(
+        "SELECT text, ts FROM diary_entries WHERE user_id=? AND ts>=? ORDER BY ts",
+        (user_id, since_ts),
+    )
+    return [{"text": r["text"], "ts": r["ts"]} for r in rows]
+
+
+def get_dyn_mood(user_id: int) -> dict | None:
+    import json
+    rows = query("SELECT dyn_mood FROM profiles WHERE user_id=?", (user_id,))
+    if not rows:
+        return None
+    try:
+        return json.loads(rows[0].get("dyn_mood") or "") or None
+    except Exception:
+        return None
+
+
+def set_dyn_mood(user_id: int, data: dict) -> None:
+    import json
+    execute("UPDATE profiles SET dyn_mood=? WHERE user_id=?",
+            (json.dumps(data, ensure_ascii=False), user_id))
 
 
 def list_diary_entries(user_id: int, limit: int = 100) -> list[dict]:

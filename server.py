@@ -29,6 +29,7 @@ WEBAPP_DIR = ROOT / "webapp"
 DIALOG_LIMIT = 30
 MOOD_MIN_SESSIONS = 10      # MOOD-оценка открывается после N сеансов
 ANALYTICS_MIN_DAYS = 10     # аналитика открывается после N дней
+DYN_MOOD_DAYS = 10          # окно/период пересчёта динамичного MOOD по дневнику
 DOC_MAX_BYTES = 1_000_000   # лимит на один файл
 DOC_TOTAL_BYTES = 5_000_000 # суммарный лимит досье
 PULSE_SCORES = [12, 32, 55, 78, 95]  # пульс 1..5 → MOOD-шкала 0-100
@@ -126,6 +127,7 @@ class Handler(BaseHTTPRequestHandler):
             "tests": tests_done, "portrait": portrait_done,
             "analytics_unlocked": days >= ANALYTICS_MIN_DAYS,
             "analytics_in_days": max(0, round(ANALYTICS_MIN_DAYS - days, 1)),
+            "onboard_test_done": bool(answers),
             "achievements": ach,
         }
 
@@ -222,6 +224,44 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return f"не удалось собрать: {e}"
 
+    def _dynamic_mood(self, uid, force=False):
+        """Настрой за последние 10 дней по записям дневника. Пересчёт раз в 10 дней (lazy)."""
+        import time as _t
+        now = _t.time()
+        win = DYN_MOOD_DAYS * 86400
+        cached = store.get_dyn_mood(uid)
+        if cached and not force and (now - cached.get("ts", 0)) < win:
+            left = max(0, DYN_MOOD_DAYS - int((now - cached.get("ts", 0)) // 86400))
+            return {**cached, "days_left": left}
+        entries = store.diary_since(uid, now - win)
+        if not entries:
+            if cached:
+                return {**cached, "days_left": 0, "stale": True}
+            return {"score": None, "note": "веди дневник — настрой посчитается по записям за 10 дней",
+                    "n": 0, "ts": now, "days_left": DYN_MOOD_DAYS, "pending": True}
+        blob = "\n".join(f"— {e['text'][:600]}" for e in entries[-30:])
+        sys = ("ты психолог. на входе — записи дневника человека за последние 10 дней. "
+               "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично) "
+               "и дай одну короткую тёплую строку-наблюдение (на «ты», строчные, без воды). "
+               "верни СТРОГО JSON: {\"score\": <int 0-100>, \"note\": \"<одна строка>\"}")
+        try:
+            resp = client.messages.create(
+                system=sys, messages=[{"role": "user", "content": blob}],
+                max_tokens=200, task="analysis",
+            )
+            raw = resp.content[0].text.strip()
+            m = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+            score = max(0, min(100, int(m.get("score"))))
+            note = str(m.get("note") or "").strip()[:160]
+            data = {"score": score, "note": note, "n": len(entries), "ts": now}
+            store.set_dyn_mood(uid, data)
+            return {**data, "days_left": DYN_MOOD_DAYS}
+        except Exception as e:
+            print("dyn_mood fail:", e, flush=True)
+            if cached:
+                return {**cached, "days_left": 0, "stale": True}
+            return {"score": None, "note": "не удалось посчитать — попробуй позже", "n": len(entries), "ts": now, "days_left": DYN_MOOD_DAYS}
+
     def _diary_polish(self, raw):
         """Бот бережно вычищает запись дневника: орфография, пунктуация, абзацы.
         Смысл, тон и голос автора не меняет. При сбое — возвращает исходник."""
@@ -274,6 +314,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"documents": store.list_documents(user["id"]),
                              "total": store.documents_total(user["id"]),
                              "limit": DOC_TOTAL_BYTES}); return
+        if p == "/api/v2/dynamic-mood":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            self._json(200, self._dynamic_mood(user["id"])); return
         if p == "/api/v2/opener":
             user = store.user_by_token(self._bearer())
             if not user:
