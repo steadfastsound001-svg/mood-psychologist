@@ -18,6 +18,7 @@ load_dotenv(ROOT / ".env", override=True)
 
 import store
 import onboarding
+import stt
 from llm import Anthropic, stream_completion_sync
 from agent_core import user_system
 
@@ -159,6 +160,27 @@ class Handler(BaseHTTPRequestHandler):
             store.add_message(uid, "user", text)
             store.add_message(uid, "assistant", reply)
 
+    def _transcribe(self):
+        """Распознаёт голос (сырые байты аудио) через Groq Whisper → {"text": ...}."""
+        if not store.user_by_token(self._bearer()):
+            self._json(401, {"error": "unauthorized"}); return
+        if not stt.enabled():
+            self._json(503, {"error": "распознавание не настроено (нет GROQ_API_KEY)"}); return
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except Exception:
+            n = 0
+        if n <= 0 or n > 25 * 1024 * 1024:
+            self._json(400, {"error": "пустой или слишком большой аудиофайл"}); return
+        audio = self.rfile.read(n)
+        ct = (self.headers.get("Content-Type") or "").lower()
+        ext = "ogg" if "ogg" in ct else "mp4" if ("mp4" in ct or "m4a" in ct) else "webm"
+        try:
+            text = stt.transcribe(audio, filename=f"voice.{ext}")
+            self._json(200, {"text": text}); return
+        except Exception as e:
+            self._json(502, {"error": str(e)}); return
+
     def _opener(self, uid):
         """Короткая личная фраза для пустого чата: по профилю + паузе с прошлого раза."""
         prof = store.get_profile(uid)
@@ -257,6 +279,9 @@ class Handler(BaseHTTPRequestHandler):
     # ── POST ──
     def do_POST(self):
         u = urlparse(self.path)
+        # транскрипция голоса читает СЫРЫЕ байты — до json-парсинга _body()
+        if u.path == "/api/v2/transcribe":
+            self._transcribe(); return
         body = self._body()
         try:
             if u.path == "/api/auth/register":

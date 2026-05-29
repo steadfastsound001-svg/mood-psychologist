@@ -295,6 +295,74 @@ function setupChat() {
   input.addEventListener("input", upd);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!send.disabled) sendMessage(); } });
   send.addEventListener("click", sendMessage);
+  setupVoice(input, upd);
+}
+
+/* ── голосовой ввод: запись → распознавание (Groq Whisper на сервере) ── */
+let mediaRec = null, recChunks = [], recStream = null, recording = false;
+function setupVoice(input, upd) {
+  const mic = $("chatMic");
+  if (!mic) return;
+  const hasRec = typeof MediaRecorder !== "undefined" && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  if (!hasRec) return;
+  mic.hidden = false;
+  mic.onclick = () => { recording ? stopVoice() : startVoice(input, upd); };
+}
+function pickMime() {
+  const cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+  for (const m of cands) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (_) {} }
+  return "";
+}
+async function startVoice(input, upd) {
+  const mic = $("chatMic");
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (_) {
+    input.placeholder = "нет доступа к микрофону";
+    setTimeout(() => { input.placeholder = "напиши что внутри…"; }, 2500);
+    return;
+  }
+  const mime = pickMime();
+  recChunks = [];
+  try { mediaRec = new MediaRecorder(recStream, mime ? { mimeType: mime } : undefined); }
+  catch (_) { mediaRec = new MediaRecorder(recStream); }
+  mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRec.onstop = () => sendVoice(input, upd);
+  mediaRec.start();
+  recording = true;
+  mic.classList.add("rec"); mic.textContent = "⏹"; haptic("medium");
+}
+function stopVoice() {
+  recording = false;
+  try { mediaRec && mediaRec.state !== "inactive" && mediaRec.stop(); } catch (_) {}
+  try { recStream && recStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  const mic = $("chatMic"); mic.classList.remove("rec"); mic.textContent = "🎙";
+}
+async function sendVoice(input, upd) {
+  const mic = $("chatMic");
+  const type = (recChunks[0] && recChunks[0].type) || "audio/webm";
+  const blob = new Blob(recChunks, { type });
+  if (!blob.size) return;
+  mic.classList.add("busy"); mic.textContent = "…";
+  const prevPh = input.placeholder; input.placeholder = "распознаю…";
+  try {
+    const res = await fetch("/api/v2/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": type, "Authorization": "Bearer " + getToken() },
+      body: blob, cache: "no-store",
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
+    const text = (j.text || "").trim();
+    if (text) { input.value = input.value ? input.value + " " + text : text; upd(); input.focus(); hapticOk(); }
+    else { input.placeholder = "не расслышал — попробуй ещё"; setTimeout(() => { input.placeholder = prevPh; }, 2500); }
+  } catch (e) {
+    input.placeholder = "ошибка распознавания";
+    setTimeout(() => { input.placeholder = prevPh; }, 2800);
+  } finally {
+    mic.classList.remove("busy"); mic.textContent = "🎙";
+    if (input.placeholder === "распознаю…") input.placeholder = prevPh;
+  }
 }
 
 let streaming = false;

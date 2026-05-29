@@ -696,6 +696,34 @@ canvas { display: block; max-width: 100%; }
   transform: scale(0.92);
   box-shadow: 0 4px 12px rgba(124,95,255,0.25);
 }
+.chat-mic {
+  background: var(--glass-strong);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text);
+  border-radius: 50%;
+  width: 40px; height: 40px;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--glass-highlight);
+  transition: transform 0.15s, background 0.2s, box-shadow 0.2s;
+}
+.chat-mic:active { transform: scale(0.92); }
+.chat-mic.busy { opacity: 0.6; cursor: default; }
+.chat-mic.rec {
+  background: #ff453a;
+  border-color: #ff453a;
+  color: white;
+  box-shadow: 0 0 0 0 rgba(255,69,58,0.6);
+  animation: micPulse 1.3s ease-out infinite;
+}
+@keyframes micPulse {
+  0% { box-shadow: 0 0 0 0 rgba(255,69,58,0.55); }
+  70% { box-shadow: 0 0 0 14px rgba(255,69,58,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,69,58,0); }
+}
 
 /* hidden-атрибут ДОЛЖЕН скрывать элемент, даже если ниже задан display:flex */
 [hidden] { display: none !important; }
