@@ -116,6 +116,24 @@ def _learn_bg(uid):
             _LEARN_RUNNING.discard(uid)
 
 
+def _recompile_bg(uid):
+    """Фоновая пересборка портрета: ответы тестов + досье + raw_info → compiled."""
+    try:
+        prof = store.get_profile(uid)
+        try:
+            answers = json.loads(prof.get("test_answers") or "{}")
+        except Exception:
+            answers = {}
+        compiled = onboarding.compile_profile(
+            answers, prof.get("raw_info") or "",
+            store.get_extra_tests(uid), store.documents_text(uid),
+        )
+        if compiled:
+            store.set_compiled(uid, compiled)
+    except Exception as e:
+        print(f"[recompile] fail uid={uid}: {e}", flush=True)
+
+
 def _maybe_learn(uid):
     """Запускает пере-осмысление в фоне, не чаще раза в 30 мин и не параллельно."""
     if time.time() - store.get_insights_at(uid) < _LEARN_MIN_GAP:
@@ -325,13 +343,15 @@ class Handler(BaseHTTPRequestHandler):
             left = max(0, DYN_MOOD_DAYS - int((now - cached.get("ts", 0)) // 86400))
             return {**cached, "days_left": left}
         entries = store.diary_since(uid, now - win)
-        has_chat = bool(store.recent_messages(uid, 1))
-        if not entries and not has_chat:
+        user_msgs = [m for m in store.recent_messages(uid, 20) if m.get("role") == "user"]
+        signals = len(entries) + len(user_msgs)
+        if signals < 3:  # из 1-2 записей честную оценку не дать
             if cached:
                 return {**cached, "days_left": 0, "stale": True}
-            return {"score": None, "note": "веди дневник и говори с психологом — настрой посчитается за 10 дней",
-                    "n": 0, "days_left": DYN_MOOD_DAYS}
-        # есть данные, но кэш пуст/устарел → считаем в фоне, ответ не ждёт LLM
+            return {"score": None,
+                    "note": f"настрой посчитается, когда наберётся больше записей и разговоров ({signals} из 3)",
+                    "n": signals, "days_left": DYN_MOOD_DAYS}
+        # данных достаточно, но кэш пуст/устарел → считаем в фоне, ответ не ждёт LLM
         with _DYN_LOCK:
             fresh = uid not in _DYN_COMPUTING
             if fresh:
@@ -463,7 +483,8 @@ class Handler(BaseHTTPRequestHandler):
                 store.save_test_answers(uid, answers)
                 if raw_info:
                     store.save_raw_info(uid, raw_info)
-                store.set_compiled(uid, "")  # onboarded=1, портрет пустой
+                store.set_compiled(uid, "")  # onboarded=1, портрет соберётся в фоне
+                threading.Thread(target=_recompile_bg, args=(uid,), daemon=True).start()
                 self._json(200, {"ok": True}); return
 
             if u.path == "/api/profile/compile":
@@ -510,6 +531,7 @@ class Handler(BaseHTTPRequestHandler):
                 extra = store.get_extra_tests(uid)
                 extra[tid] = tans
                 store.save_extra_tests(uid, extra)
+                threading.Thread(target=_recompile_bg, args=(uid,), daemon=True).start()
                 self._json(200, {"ok": True, "stats": self._build_stats(uid)}); return
 
             if u.path == "/api/documents":

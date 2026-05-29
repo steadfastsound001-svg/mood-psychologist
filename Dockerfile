@@ -6,6 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py store.py onboarding.py llm.py agent_core.py stt.py ./
+COPY SOUL.md ./
 COPY webapp ./webapp
 
 # persistent SQLite живёт здесь (Fly volume монтируется в /app/data)

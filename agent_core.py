@@ -3,6 +3,13 @@
 Не тянет тяжёлых зависимостей (нет telegram/whisper) — безопасно импортировать на хостинге.
 """
 import re
+from pathlib import Path
+
+# SOUL.md — слой «души»/голоса (по образцу OpenClaw). Высший приоритет в system.
+try:
+    SOUL = (Path(__file__).parent / "SOUL.md").read_text(encoding="utf-8").strip()
+except Exception:
+    SOUL = ""
 
 SYSTEM_BASE = """ты — личный психолог и наставник. топ-уровень, калифорнийская школа: stanford / ucla / kaiser. сам прошёл свою терапию. EBPP/APA-стандарт.
 
@@ -113,8 +120,11 @@ mat. emoji-заголовки. markdown кроме **bold**.
 
 
 def user_system(compiled_profile: str, insights: str = "") -> list:
-    """Универсальное ядро + персональный профиль клиента + живые инсайты (само-обучение)."""
-    blocks = [{"type": "text", "text": SYSTEM_BASE}]
+    """Душа (SOUL.md) + универсальное ядро + персональный профиль + живые инсайты."""
+    blocks = []
+    if SOUL:
+        blocks.append({"type": "text", "text": SOUL})
+    blocks.append({"type": "text", "text": SYSTEM_BASE})
     cp = (compiled_profile or "").strip()
     if cp:
         blocks.append({

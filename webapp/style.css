@@ -1383,3 +1383,25 @@ a:focus:not(:focus-visible),
   text-decoration: underline; text-underline-offset: 3px;
 }
 @media (hover: hover) { .onboard-skip:hover { color: var(--text); } }
+
+/* ═══════════ v31: сворачиваемый блок, фикс фриза скролла на iOS ═══════════ */
+.collapse-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: none; border: none; padding: 0; cursor: pointer; color: var(--text);
+  font-family: var(--font-display); font-weight: 600; font-size: var(--t-headline); text-align: left;
+}
+.collapse-chevron .ico { width: 20px; height: 20px; color: var(--hint); transition: transform 0.25s; }
+.collapsible.collapsed .collapse-chevron .ico { transform: rotate(-90deg); }
+.collapse-body { overflow: hidden; max-height: 1600px; transition: max-height 0.35s ease; margin-top: 14px; }
+.collapsible.collapsed .collapse-body { max-height: 0; margin-top: 0; }
+.dossier-sub { margin-top: 22px; margin-bottom: 8px; font-family: var(--font-display); font-weight: 600; color: var(--text); }
+
+/* iOS: множественные backdrop-filter на фикс/sticky-элементах вешают скролл чата.
+   На узких экранах отключаем размытие — фон и так почти непрозрачный. */
+@media (max-width: 760px) {
+  .tab-bar, .composer, .theme-toggle, .chat-topbar, .card, .test-sheet, .test-modal,
+  .auth-card, .onboard-head, .glass, [class*="glass"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}

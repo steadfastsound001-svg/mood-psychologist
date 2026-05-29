@@ -22,6 +22,7 @@ const ICONS = {
   "file-text": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
   "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  "chevron-down": '<path d="m6 9 6 6 6-6"/>',
 };
 function ico(name) {
   return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
@@ -234,6 +235,7 @@ async function obNext() {
 let appInited = false;
 function initApp() {
   stopNeural();
+  fetch("/api/health", { cache: "no-store" }).catch(() => {});  // будим спящий инстанс заранее
   if (!appInited) {
     appInited = true;
     injectIcons();
@@ -249,6 +251,13 @@ function initApp() {
     $("fileBtn").onclick = () => $("fileInput").click();
     $("fileInput").onchange = (e) => uploadFiles(e.target.files);
     $("diarySave").onclick = saveDiaryFromTab;
+    const dh = $("dossierHead");
+    if (dh) dh.onclick = () => {
+      haptic();
+      const c = $("dossierCard");
+      c.classList.toggle("collapsed");
+      dh.setAttribute("aria-expanded", c.classList.contains("collapsed") ? "false" : "true");
+    };
     $("tmClose").onclick = closeTest;
     setupThemes();
     loadExtraTests();
@@ -581,35 +590,47 @@ async function sendMessage() {
     f[f.length - 1].text = acc || "(пусто)";
     saveChat(f);
   };
-  try {
+  const render = (s) => { agentEl.innerHTML = mdLite(s); };  // mdLite экранирует html (см. mdLite)
+  const runStream = async () => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 120000);
-    const res = await fetch("/api/v2/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + getToken() },
-      body: JSON.stringify({ q: text }),
-      cache: "no-store",
-      signal: ctrl.signal,
-    });
-    if (!res.ok || !res.body) {
-      let msg = "HTTP " + res.status;
-      try { const j = await res.json(); msg = j.error || msg; } catch (_) {}
-      throw new Error(msg);
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    while (true) {
-      const { value, done: rdone } = await reader.read();
-      if (rdone) break;
-      acc += dec.decode(value, { stream: true });
-      agentEl.innerHTML = mdLite(acc);
-      box.scrollTop = box.scrollHeight;
-    }
-    clearTimeout(timer);
+    try {
+      const res = await fetch("/api/v2/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + getToken() },
+        body: JSON.stringify({ q: text }),
+        cache: "no-store",
+        signal: ctrl.signal,
+      });
+      if (!res.ok || !res.body) {
+        let msg = "HTTP " + res.status;
+        try { const j = await res.json(); msg = j.error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      while (true) {
+        const { value, done: rdone } = await reader.read();
+        if (rdone) break;
+        acc += dec.decode(value, { stream: true });
+        render(acc);
+        box.scrollTop = box.scrollHeight;
+      }
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    await runStream();
     done();
   } catch (e) {
-    if (!acc) acc = "сломалось: " + e.message;
-    agentEl.innerHTML = mdLite(acc);
+    // Render free спит, просыпается ~50с — первая попытка часто падает (Load failed/abort).
+    if (!acc) {
+      agentEl.textContent = "просыпаюсь, секунду…";
+      try { await fetch("/api/health", { cache: "no-store" }); } catch (_) {}
+      await sleep(1800);
+      try { acc = ""; await runStream(); done(); return; }
+      catch (_) { acc = "связь сорвалась — попробуй ещё раз"; }
+    }
+    render(acc);
     done();
   }
 }

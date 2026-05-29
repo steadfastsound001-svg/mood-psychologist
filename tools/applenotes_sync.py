@@ -127,27 +127,33 @@ def write_note(title: str, text_html: str) -> None:
     _osascript(script)
 
 
+DOC_NAME = "[Apple Notes] папка «Психолог»"
+
+
 def cmd_pull():
     notes = read_notes()
-    print(f"в папке «{FOLDER}»: {len(notes)} заметок")
-    existing = {d["name"] for d in _api("/api/documents").get("documents", [])}
-    added = skipped = 0
+    # дедуп по (имя, начало тела)
+    seen, uniq = set(), []
     for n in notes:
-        body = (n["body"] or "").strip()
-        if not body:
-            skipped += 1; continue
-        name = ("[заметка] " + (n["name"] or "без названия"))[:120]
-        if name in existing:
-            skipped += 1; continue
-        content = body[:PER_NOTE_CAP]
-        try:
-            _api("/api/documents", data={"name": name, "content": content})
-            added += 1
-            print(f"  + {name} ({len(content)}b)")
-        except urllib.error.HTTPError as e:
-            print(f"  ! {name}: HTTP {e.code} ({e.read().decode()[:80]}) — стоп"); break
-        time.sleep(0.2)
-    print(f"импортировано: {added}, пропущено (пусто/дубль): {skipped}")
+        b = (n["body"] or "").strip()
+        if not b:
+            continue
+        key = (n["name"], b[:160])
+        if key in seen:
+            continue
+        seen.add(key); uniq.append(n)
+    uniq.sort(key=lambda n: n["name"])
+    blob = "\n\n".join(f"### {n['name']}\n{n['body'].strip()}" for n in uniq)
+    print(f"в папке «{FOLDER}»: {len(notes)} заметок, уникальных {len(uniq)}, свод {len(blob)}b")
+    # удалить прежний свод и старые поштучные импорты
+    docs = _api("/api/documents").get("documents", [])
+    for d in docs:
+        if d["name"] == DOC_NAME or d["name"].startswith("[заметка]"):
+            try: _api("/api/documents/delete", data={"id": d["id"]})
+            except Exception: pass
+    # один аккуратный документ (лимит 1 МБ)
+    _api("/api/documents", data={"name": DOC_NAME, "content": blob[:990000]})
+    print(f"готово: свод из {len(uniq)} заметок → 1 документ «{DOC_NAME}»")
 
 
 def cmd_push():

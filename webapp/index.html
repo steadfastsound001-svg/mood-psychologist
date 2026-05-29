@@ -30,7 +30,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=30">
+<link rel="stylesheet" href="/style.css?v=31">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -171,21 +171,23 @@
       <button class="btn-ghost full" id="weeklyBtn" style="margin-top:10px">собрать итоги недели</button>
     </section>
 
-    <!-- досье -->
-    <section class="card">
-      <h3>досье — загрузи о себе</h3>
-      <div class="card-note">тексты, переписки, заметки, история. до 1 МБ на файл, 5 МБ всего.</div>
-      <input type="file" id="fileInput" multiple accept=".txt,.md,.csv,.json,.html,.htm,.log,.rtf" hidden>
-      <button class="btn-ghost full" id="fileBtn" style="margin-top:12px">+ добавить файл</button>
-      <div id="fileList" class="file-list"></div>
-    </section>
+    <!-- досье (сворачивается; «добавить о себе» внутри) -->
+    <section class="card collapsible collapsed" id="dossierCard">
+      <button class="collapse-head" id="dossierHead" aria-expanded="false">
+        <span>досье — что знает о тебе психолог</span>
+        <span class="collapse-chevron" data-ico="chevron-down"></span>
+      </button>
+      <div class="collapse-body">
+        <div class="card-note">тексты, переписки, заметки, история. до 1 МБ на файл, 5 МБ всего.</div>
+        <input type="file" id="fileInput" multiple accept=".txt,.md,.csv,.json,.html,.htm,.log,.rtf" hidden>
+        <button class="btn-ghost full" id="fileBtn" style="margin-top:12px">+ добавить файл</button>
+        <div id="fileList" class="file-list"></div>
 
-    <!-- добавить о себе -->
-    <section class="card">
-      <h3>добавить о себе</h3>
-      <textarea class="field area" id="profInfo" rows="4" placeholder="контекст, прошлое, отношения, цели…"></textarea>
-      <button class="btn-primary" id="profSave" style="margin-top:12px">сохранить и обновить портрет</button>
-      <div class="prof-saved" id="profSaved" hidden>обновил портрет ✓</div>
+        <div class="dossier-sub">добавить о себе</div>
+        <textarea class="field area" id="profInfo" rows="4" placeholder="контекст, прошлое, отношения, цели…"></textarea>
+        <button class="btn-primary" id="profSave" style="margin-top:12px">сохранить и обновить портрет</button>
+        <div class="prof-saved" id="profSaved" hidden>обновил портрет ✓</div>
+      </div>
     </section>
 
     <!-- аккаунт -->
@@ -264,6 +266,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=30"></script>
+<script src="/app.js?v=31"></script>
 </body>
 </html>
