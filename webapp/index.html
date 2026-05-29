@@ -30,7 +30,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=25">
+<link rel="stylesheet" href="/style.css?v=26">
+<script>
+  // тема до первой отрисовки — без мигания
+  try {
+    var t = localStorage.getItem("mood_theme") || "dark";
+    if (t !== "light") document.documentElement.classList.add("dark");
+  } catch (e) { document.documentElement.classList.add("dark"); }
+</script>
 </head>
 <body>
 
@@ -40,6 +47,7 @@
 
 <!-- ───────── AUTH ───────── -->
 <div id="authScreen" class="screen" hidden>
+  <canvas id="authCanvas" class="auth-bg"></canvas>
   <div class="auth-card">
     <div class="auth-logo">◆</div>
     <div class="auth-title">MOOD</div>
@@ -83,6 +91,8 @@
 <!-- ───────── APP ───────── -->
 <div class="wrap app" id="app" hidden>
 
+  <button class="theme-toggle" id="themeToggle" title="сменить тему"></button>
+
   <!-- CHAT view -->
   <div id="chatView" class="chat-view">
     <div class="chat-topbar">
@@ -90,11 +100,15 @@
     </div>
     <div class="chat-messages" id="chatMessages"></div>
     <div class="diary-hint" id="diaryHint" hidden>режим дневника — пиши запись, психолог почистит и сохранит</div>
-    <div class="chat-input-bar" id="chatInputBar">
-      <button class="chat-diary" id="chatDiaryBtn" title="запись в дневник">❧</button>
-      <button class="chat-mic" id="chatMic" title="голосом" hidden>🎙</button>
-      <textarea class="chat-input" id="chatInput" rows="1" placeholder="напиши что внутри…" autocomplete="off"></textarea>
-      <button class="chat-send" id="chatSend" title="отправить" disabled>↑</button>
+    <div class="composer" id="chatInputBar">
+      <textarea class="composer-input" id="chatInput" rows="1" placeholder="напиши что внутри…" autocomplete="off"></textarea>
+      <div class="composer-actions">
+        <div class="composer-group">
+          <button class="composer-btn" id="chatDiaryBtn" data-ico="feather" title="запись в дневник"></button>
+          <button class="composer-btn" id="chatMic" data-ico="mic" title="голосом" hidden></button>
+        </div>
+        <button class="composer-send" id="chatSend" data-ico="arrow-up" title="отправить" disabled></button>
+      </div>
     </div>
   </div>
 
@@ -107,7 +121,7 @@
     <!-- MOOD score -->
     <section class="card mood-card">
       <div id="moodLocked" class="locked">
-        <div class="locked-ico">🔒</div>
+        <div class="locked-ico" data-ico="lock"></div>
         <div class="locked-t">оценка MOOD</div>
         <div class="locked-s" id="moodProg">откроется после 10 сеансов</div>
       </div>
@@ -118,13 +132,6 @@
         </div>
         <div class="mood-cap" id="moodCap"></div>
       </div>
-    </section>
-
-    <!-- пульс настроения -->
-    <section class="card pulse-card" id="pulseCard">
-      <h3>как ты сейчас?</h3>
-      <div class="card-note" id="pulseNote">отметь настроение — это рисует твою динамику</div>
-      <div class="pulse-row" id="pulseRow"></div>
     </section>
 
     <!-- портрет -->
@@ -174,22 +181,6 @@
       <div class="prof-saved" id="profSaved" hidden>обновил портрет ✓</div>
     </section>
 
-    <!-- тема -->
-    <section class="card">
-      <h3>тема</h3>
-      <div class="card-note">оформление приложения</div>
-      <div class="theme-row" id="themeRow">
-        <button class="theme-opt" data-theme="night">
-          <span class="theme-swatch night"></span>
-          <span class="theme-name">ночь</span>
-        </button>
-        <button class="theme-opt" data-theme="diary">
-          <span class="theme-swatch diary"></span>
-          <span class="theme-name">дневник</span>
-        </button>
-      </div>
-    </section>
-
     <!-- аккаунт -->
     <section class="card">
       <h3>аккаунт</h3>
@@ -204,21 +195,37 @@
     <div class="page-header">
       <div class="page-title">ДНЕВНИК</div>
     </div>
-    <div class="card-note" style="margin-bottom:14px">записи копятся из чата — нажми ❧ и пиши</div>
+
+    <!-- пульс настроения -->
+    <section class="card pulse-card" id="pulseCard">
+      <h3>как ты сегодня?</h3>
+      <div class="card-note" id="pulseNote">отметь настроение — это рисует твою динамику</div>
+      <div class="pulse-row" id="pulseRow"></div>
+    </section>
+
+    <!-- новая запись -->
+    <section class="card diary-compose">
+      <h3>новая запись</h3>
+      <textarea class="field area" id="diaryInput" rows="4" placeholder="что сегодня на душе…"></textarea>
+      <button class="btn-primary" id="diarySave" style="margin-top:12px">сохранить запись</button>
+      <div class="prof-saved" id="diarySaved" hidden>сохранено ✓</div>
+    </section>
+
+    <div class="diary-section-label">прошлые записи</div>
     <div id="diaryList" class="diary-list"></div>
   </div>
 
   <nav class="tab-bar">
     <button class="tab-item active" data-view="chat">
-      <span class="tab-icon">◆</span>
+      <span class="tab-icon" data-ico="message-circle"></span>
       <span class="tab-label">CHAT</span>
     </button>
     <button class="tab-item" data-view="diary">
-      <span class="tab-icon">❧</span>
+      <span class="tab-icon" data-ico="book-open"></span>
       <span class="tab-label">ДНЕВНИК</span>
     </button>
     <button class="tab-item" data-view="profile">
-      <span class="tab-icon">✦</span>
+      <span class="tab-icon" data-ico="sparkles"></span>
       <span class="tab-label">MOOD</span>
     </button>
   </nav>
@@ -250,6 +257,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=25"></script>
+<script src="/app.js?v=26"></script>
 </body>
 </html>

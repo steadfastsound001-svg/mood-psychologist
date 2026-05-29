@@ -7,6 +7,29 @@ const haptic = (k = "light") => { try { tg?.HapticFeedback?.impactOccurred(k); }
 const hapticOk = () => { try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (_) {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* ───────── единые монохромные иконки (lucide) ───────── */
+const ICONS = {
+  "message-circle": '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  "book-open": '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  "sparkles": '<path d="M9.94 14.06A2 2 0 0 0 8.5 12.6l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 8.48A2 2 0 0 0 9.94 7.04l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14A2 2 0 0 0 15.5 8.48l6.14 1.58a.5.5 0 0 1 0 .96L15.5 12.6a2 2 0 0 0-1.44 1.46l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  "mic": '<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>',
+  "square": '<rect width="14" height="14" x="5" y="5" rx="2"/>',
+  "arrow-up": '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  "feather": '<path d="M12.67 19a2 2 0 0 0 1.42-.59l6.15-6.17a6 6 0 0 0-8.49-8.49L5.59 9.91A2 2 0 0 0 5 11.33V18a1 1 0 0 0 1 1z"/><path d="M16 8 2 22"/><path d="M17.5 15H9"/>',
+  "lock": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  "moon": '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  "file-text": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+};
+function ico(name) {
+  return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
+}
+function injectIcons(root = document) {
+  root.querySelectorAll("[data-ico]").forEach((el) => { el.innerHTML = ico(el.dataset.ico); });
+}
+
 /* count-up: плавно гонит число от текущего к target */
 function animateNum(el, target, dur = 900) {
   if (!el) return;
@@ -57,6 +80,8 @@ async function api(path, { method = "GET", body = null, auth = true, timeout = 6
 
 function show(screen) {
   for (const id of ["authScreen", "onboardScreen", "app"]) $(id).hidden = (id !== screen);
+  if (screen === "authScreen") initNeural();
+  else stopNeural();
 }
 
 /* mdLite: **bold** → <b>, экранирование html */
@@ -225,8 +250,10 @@ async function obNext() {
 /* ───────── APP (chat + profile) ───────── */
 let appInited = false;
 function initApp() {
+  stopNeural();
   if (!appInited) {
     appInited = true;
+    injectIcons();
     document.querySelectorAll(".tab-item").forEach((b) => {
       b.addEventListener("click", () => { haptic("medium"); switchView(b.dataset.view); });
     });
@@ -238,6 +265,7 @@ function initApp() {
     $("logoutBtn").onclick = () => { clearToken(); location.reload(); };
     $("fileBtn").onclick = () => $("fileInput").click();
     $("fileInput").onchange = (e) => uploadFiles(e.target.files);
+    $("diarySave").onclick = saveDiaryFromTab;
     $("tmClose").onclick = closeTest;
     setupThemes();
     loadExtraTests();
@@ -342,17 +370,40 @@ async function saveDiaryEntry(text) {
 
 /* ── вкладка дневника ── */
 async function loadDiary() {
+  // настроение живёт здесь же
+  try { lastStats = await api("/api/stats"); renderPulse(lastStats); }
+  catch (_) { renderPulse(null); }
   try {
     const r = await api("/api/diary");
     renderDiary(r.entries || []);
   } catch (_) { renderDiary([]); }
+}
+async function saveDiaryFromTab() {
+  const input = $("diaryInput"), btn = $("diarySave");
+  const text = input.value.trim();
+  if (!text) return;
+  btn.disabled = true; btn.textContent = "сохраняю…";
+  try {
+    const r = await api("/api/diary", { method: "POST", body: { text } });
+    input.value = "";
+    $("diarySaved").hidden = false;
+    hapticOk();
+    setTimeout(() => { $("diarySaved").hidden = true; }, 2200);
+    if (r.entries) renderDiary(r.entries);
+  } catch (e) {
+    btn.textContent = "ошибка — ещё раз";
+    setTimeout(() => { btn.textContent = "сохранить запись"; }, 2200);
+    return;
+  } finally {
+    btn.disabled = false; btn.textContent = "сохранить запись";
+  }
 }
 function renderDiary(entries) {
   const box = $("diaryList");
   if (!box) return;
   box.innerHTML = "";
   if (!entries.length) {
-    box.innerHTML = '<div class="diary-empty">пока пусто. в чате нажми ❧ и напиши первую запись</div>';
+    box.innerHTML = '<div class="diary-empty">пока пусто — напиши первую запись выше</div>';
     return;
   }
   entries.forEach((e) => {
@@ -360,7 +411,7 @@ function renderDiary(entries) {
     el.className = "diary-entry";
     const d = new Date((e.ts || 0) * 1000);
     const date = isNaN(d) ? "" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
-    el.innerHTML = `<button class="diary-del" title="удалить">✕</button>
+    el.innerHTML = `<button class="diary-del" title="удалить">${ico("x")}</button>
       <div class="diary-date">${date}</div>
       <div class="diary-text"></div>`;
     el.querySelector(".diary-text").textContent = e.text;
@@ -376,20 +427,82 @@ async function delDiary(id) {
   } catch (_) {}
 }
 
-/* ── темы ── */
+/* ── темы: тёмная / светлая, переключатель всегда сверху ── */
 const THEME_KEY = "mood_theme";
+let curTheme = "dark";
 function applyTheme(name) {
-  if (name === "diary") document.documentElement.setAttribute("data-theme", "diary");
-  else document.documentElement.removeAttribute("data-theme");
-  try { localStorage.setItem(THEME_KEY, name); } catch (_) {}
-  document.querySelectorAll(".theme-opt").forEach((b) => b.classList.toggle("sel", b.dataset.theme === name));
+  curTheme = name === "light" ? "light" : "dark";
+  document.documentElement.classList.toggle("dark", curTheme === "dark");
+  try { localStorage.setItem(THEME_KEY, curTheme); } catch (_) {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", curTheme === "dark" ? "#2d2621" : "#f5f1e6");
+  const tog = $("themeToggle");
+  if (tog) {
+    // показываем иконку цели переключения
+    tog.innerHTML = ico(curTheme === "dark" ? "sun" : "moon");
+    tog.title = curTheme === "dark" ? "светлая тема" : "тёмная тема";
+  }
 }
 function setupThemes() {
-  const saved = (() => { try { return localStorage.getItem(THEME_KEY); } catch (_) { return null; } })() || "night";
+  const saved = (() => { try { return localStorage.getItem(THEME_KEY); } catch (_) { return null; } })() || "dark";
   applyTheme(saved);
-  document.querySelectorAll(".theme-opt").forEach((b) => {
-    b.onclick = () => { haptic("medium"); applyTheme(b.dataset.theme); };
-  });
+  const tog = $("themeToggle");
+  if (tog) tog.onclick = () => { haptic("medium"); applyTheme(curTheme === "dark" ? "light" : "dark"); };
+}
+
+/* ── нейросетевой фон на экране входа (particle network) ── */
+let neuralRAF = 0, neuralResize = null;
+function stopNeural() {
+  if (neuralRAF) { cancelAnimationFrame(neuralRAF); neuralRAF = 0; }
+  if (neuralResize) { window.removeEventListener("resize", neuralResize); neuralResize = null; }
+}
+function initNeural() {
+  stopNeural();
+  const cv = $("authCanvas");
+  if (!cv) return;
+  const ctx = cv.getContext("2d");
+  let W = 0, H = 0, dpr = Math.min(2, window.devicePixelRatio || 1);
+  const accent = (getComputedStyle(document.documentElement).getPropertyValue("--accent-rgb") || "166,124,82").trim();
+  let pts = [];
+  const resize = () => {
+    W = cv.clientWidth || window.innerWidth;
+    H = cv.clientHeight || window.innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const target = Math.min(64, Math.round((W * H) / 14000));
+    pts = [];
+    for (let i = 0; i < target; i++) {
+      pts.push({ x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35 });
+    }
+  };
+  neuralResize = resize;
+  window.addEventListener("resize", resize);
+  resize();
+  const LINK = 130;
+  const frame = () => {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of pts) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > W) p.vx *= -1;
+      if (p.y < 0 || p.y > H) p.vy *= -1;
+    }
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+        const d = Math.hypot(dx, dy);
+        if (d < LINK) {
+          ctx.strokeStyle = `rgba(${accent},${(1 - d / LINK) * 0.22})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
+        }
+      }
+    }
+    ctx.fillStyle = `rgba(${accent},0.55)`;
+    for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, 1.6, 0, 6.2832); ctx.fill(); }
+    neuralRAF = requestAnimationFrame(frame);
+  };
+  frame();
 }
 
 /* ── голосовой ввод: запись → распознавание (Groq Whisper на сервере) ── */
@@ -424,20 +537,20 @@ async function startVoice(input, upd) {
   mediaRec.onstop = () => sendVoice(input, upd);
   mediaRec.start();
   recording = true;
-  mic.classList.add("rec"); mic.textContent = "⏹"; haptic("medium");
+  mic.classList.add("rec"); mic.innerHTML = ico("square"); haptic("medium");
 }
 function stopVoice() {
   recording = false;
   try { mediaRec && mediaRec.state !== "inactive" && mediaRec.stop(); } catch (_) {}
   try { recStream && recStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
-  const mic = $("chatMic"); mic.classList.remove("rec"); mic.textContent = "🎙";
+  const mic = $("chatMic"); mic.classList.remove("rec"); mic.innerHTML = ico("mic");
 }
 async function sendVoice(input, upd) {
   const mic = $("chatMic");
   const type = (recChunks[0] && recChunks[0].type) || "audio/webm";
   const blob = new Blob(recChunks, { type });
   if (!blob.size) return;
-  mic.classList.add("busy"); mic.textContent = "…";
+  mic.classList.add("busy"); mic.innerHTML = ico("mic");
   const prevPh = input.placeholder; input.placeholder = "распознаю…";
   try {
     const res = await fetch("/api/v2/transcribe", {
@@ -454,7 +567,7 @@ async function sendVoice(input, upd) {
     input.placeholder = "ошибка распознавания";
     setTimeout(() => { input.placeholder = prevPh; }, 2800);
   } finally {
-    mic.classList.remove("busy"); mic.textContent = "🎙";
+    mic.classList.remove("busy"); mic.innerHTML = ico("mic");
     if (input.placeholder === "распознаю…") input.placeholder = prevPh;
   }
 }
@@ -545,7 +658,6 @@ async function loadStats() {
     lastStats = await api("/api/stats");
   } catch (_) { lastStats = null; }
   renderMood(lastStats);
-  renderPulse(lastStats);
   renderTests(lastStats);
   renderAnalytics(lastStats);
   // итоги недели открываются после 3 сеансов
@@ -648,7 +760,7 @@ function renderAnalytics(s) {
   const box = $("analyticsBox");
   if (!s) { box.innerHTML = '<div class="card-note">—</div>'; return; }
   if (!s.analytics_unlocked) {
-    box.innerHTML = `<div class="locked"><div class="locked-ico">🔒</div>
+    box.innerHTML = `<div class="locked"><div class="locked-ico">${ico("lock")}</div>
       <div class="locked-t">графики и динамика</div>
       <div class="locked-s">откроется через ${Math.ceil(s.analytics_in_days)} ${plural(Math.ceil(s.analytics_in_days), "день", "дня", "дней")} терапии</div></div>`;
     return;
@@ -659,7 +771,7 @@ function renderAnalytics(s) {
   box.innerHTML = `<div class="stat-grid">
     ${stat("сеансов", s.sessions)}
     ${stat("сообщений", s.user_msgs)}
-    ${stat("дней подряд", streak > 0 ? "🔥 " + streak : "—")}
+    ${stat("дней подряд", streak > 0 ? `<span class="stat-flame">${ico("flame")}</span> ` + streak : "—")}
     ${stat("MOOD", s.mood != null ? s.mood : "—")}
   </div>${spark ? `<div class="spark-wrap"><div class="spark-cap">динамика MOOD</div>${spark}</div>` : ""}`;
 }
@@ -827,7 +939,7 @@ function renderDocs(docs, total) {
   const kb = (n) => n > 1024 * 1024 ? (n / 1048576).toFixed(1) + " МБ" : Math.max(1, Math.round(n / 1024)) + " КБ";
   docs.forEach((d) => {
     const el = document.createElement("div"); el.className = "file-row";
-    el.innerHTML = `<span class="file-name">📄 ${escapeHtml(d.name)}</span><span class="file-size">${kb(d.size)}</span><button class="file-del" data-id="${d.id}">✕</button>`;
+    el.innerHTML = `<span class="file-name">${ico("file-text")} ${escapeHtml(d.name)}</span><span class="file-size">${kb(d.size)}</span><button class="file-del" data-id="${d.id}">${ico("x")}</button>`;
     el.querySelector(".file-del").onclick = () => deleteDoc(d.id);
     box.appendChild(el);
   });
