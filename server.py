@@ -3,6 +3,8 @@
 Эндпойнты: health, auth (register/login/google), onboarding, profile, v2/chat, статика webapp/.
 Порт из ENV PORT (Fly/Render дают 8080). SQLite в data/ (на Fly — persistent volume).
 """
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -10,7 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode
 
 from dotenv import load_dotenv
 
@@ -37,6 +39,9 @@ PULSE_SCORES = [12, 32, 55, 78, 95]  # пульс 1..5 → MOOD-шкала 0-100
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip("/")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+OWNER_TG_ID = os.environ.get("OWNER_TG_ID", "").strip()           # telegram-id владельца → его Google-акк
+OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "steadfast.sound001@gmail.com").strip().lower()
 
 
 _DYN_COMPUTING = set()   # uid'ы, для которых динамичный MOOD сейчас считается в фоне
@@ -47,7 +52,6 @@ def _dyn_mood_compute(uid, entries):
     """Фоновый подсчёт настроя за 10 дней по дневнику + перепискам с психологом. Кэширует."""
     try:
         now = time.time()
-        cutoff = now - DYN_MOOD_DAYS * 86400
         diary_blob = "\n".join(f"— {e['text'][:600]}" for e in entries[-30:])
         # реплики самого клиента из чата за окно
         msgs = store.recent_messages(uid, 80)
@@ -145,6 +149,28 @@ def _maybe_learn(uid):
     threading.Thread(target=_learn_bg, args=(uid,), daemon=True).start()
 
 
+def _verify_telegram(init_data: str) -> dict | None:
+    """Валидирует Telegram WebApp initData по HMAC (ботовый токен). Возвращает tg-user или None."""
+    if not TELEGRAM_TOKEN or not init_data:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+    except Exception:
+        return None
+    recv_hash = pairs.pop("hash", None)
+    if not recv_hash:
+        return None
+    data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
+    secret = hmac.new(b"WebAppData", TELEGRAM_TOKEN.encode(), hashlib.sha256).digest()
+    calc = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(calc, recv_hash):
+        return None
+    try:
+        return json.loads(pairs.get("user") or "{}") or None
+    except Exception:
+        return None
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         return
@@ -218,13 +244,6 @@ class Handler(BaseHTTPRequestHandler):
         mood = onboarding.compute_mood(answers, extra) if sessions >= MOOD_MIN_SESSIONS else None
         portrait_done = bool((prof.get("compiled") or "").strip())
         tests_done = {t["id"]: (t["id"] in extra) for t in onboarding.EXTRA_TESTS}
-        ach = [{"id": "start", "icon": "🚀", "label": "старт", "got": bool(prof.get("onboarded"))}]
-        for t in onboarding.EXTRA_TESTS:
-            a = t["achievement"]
-            ach.append({"id": t["id"], "icon": a["icon"], "label": a["label"], "got": t["id"] in extra})
-        ach.append({"id": "portrait", "icon": "🎨", "label": "портрет собран", "got": portrait_done})
-        ach.append({"id": "streak7", "icon": "🔥", "label": "7 дней подряд", "got": streak >= 7})
-        ach.append({"id": "sessions10", "icon": "💬", "label": "10 сеансов", "got": sessions >= MOOD_MIN_SESSIONS})
         return {
             "sessions": sessions, "user_msgs": st["user_msgs"], "days_since_reg": round(days, 1),
             "streak": streak,
@@ -235,7 +254,6 @@ class Handler(BaseHTTPRequestHandler):
             "analytics_unlocked": days >= ANALYTICS_MIN_DAYS,
             "analytics_in_days": max(0, round(ANALYTICS_MIN_DAYS - days, 1)),
             "onboard_test_done": bool(answers),
-            "achievements": ach,
         }
 
     def _chat_stream(self, uid, text):
@@ -314,8 +332,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def _weekly(self, uid):
         """Рефлексия психолога за последние 7 дней по сообщениям клиента."""
-        import time as _t
-        cutoff = _t.time() - 7 * 86400
         rows = store.recent_messages(uid, 120)
         user_texts = [m["content"] for m in rows if m.get("role") == "user"]
         if len(user_texts) < 3:
@@ -420,6 +436,11 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self._json(401, {"error": "unauthorized"}); return
             self._json(200, self._dynamic_mood(user["id"])); return
+        if p == "/api/v2/messages":
+            user = store.user_by_token(self._bearer())
+            if not user:
+                self._json(401, {"error": "unauthorized"}); return
+            self._json(200, {"messages": store.recent_messages(user["id"], 100)}); return
         if p == "/api/v2/opener":
             user = store.user_by_token(self._bearer())
             if not user:
@@ -461,6 +482,20 @@ class Handler(BaseHTTPRequestHandler):
                 if not user:
                     self._json(409, {"error": "email уже занят"}); return
                 self._json(200, {"token": store.create_session(user["id"]), "user": user}); return
+
+            if u.path == "/api/auth/telegram":
+                # нативный вход из Telegram mini-app: Google OAuth внутри webview Telegram блокирует.
+                tg_user = _verify_telegram(body.get("initData") or "")
+                if not tg_user or not tg_user.get("id"):
+                    self._json(401, {"error": "telegram auth failed"}); return
+                tgid = str(tg_user["id"])
+                name = (tg_user.get("first_name") or "").strip()
+                # tg-id владельца → его Google-аккаунт (единая база); прочие → изолированный tg-акк
+                email = OWNER_EMAIL if (OWNER_TG_ID and tgid == OWNER_TG_ID) else f"tg{tgid}@telegram.local"
+                user = store.get_or_create_oauth_user(email, name or "telegram")
+                prof = store.get_profile(user["id"])
+                self._json(200, {"token": store.create_session(user["id"]), "user": user,
+                                 "onboarded": bool(prof.get("onboarded"))}); return
 
             if u.path == "/api/auth/login":
                 user = store.verify_user((body.get("email") or "").strip().lower(), body.get("password") or "")

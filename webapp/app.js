@@ -108,6 +108,13 @@ async function boot() {
     const err = $("authError"); err.textContent = "google-вход не удался, попробуй ещё раз"; err.hidden = false;
     return;
   }
+  // нативный вход из Telegram mini-app (Google OAuth там блокируется webview)
+  if (!getToken() && tg && tg.initData) {
+    try {
+      const r = await api("/api/auth/telegram", { method: "POST", auth: false, body: { initData: tg.initData } });
+      if (r.token) { setToken(r.token); window.__me = r.user; }
+    } catch (_) {}
+  }
   if (!getToken()) { initAuth(); show("authScreen"); return; }
   try {
     const me = await api("/api/me");
@@ -271,8 +278,24 @@ function switchView(view) {
   $("profileView").hidden = view !== "profile";
   $("diaryView").hidden = view !== "diary";
   if (view === "profile") loadProfile();
-  if (view === "chat") chatRender();
+  if (view === "chat") hydrateChat();
   if (view === "diary") loadDiary();
+}
+
+/* история чата живёт в БД (одна на все устройства). локалка — лишь мгновенный кэш.
+   рисуем кэш сразу, потом подтягиваем канон с сервера и сверяем. */
+async function hydrateChat() {
+  if (streaming) return;            // не трогаем во время стрима
+  chatRender();                     // мгновенно из кэша
+  let r = null;
+  try { r = await api("/api/v2/messages"); } catch (_) {}
+  if (streaming) return;
+  if (r && Array.isArray(r.messages)) {
+    const h = r.messages.map((m) => ({ role: m.role === "user" ? "user" : "agent", text: m.content }));
+    saveChat(h);
+    chatRender();
+  }
+  if (!loadChat().length) maybeOpener();
 }
 
 /* ── chat ── */
@@ -289,7 +312,6 @@ function chatRender() {
     e.className = "chat-empty";
     e.textContent = "напиши что внутри — разберём вместе";
     box.appendChild(e);
-    maybeOpener();
     return;
   }
   for (const m of h) {
@@ -582,15 +604,28 @@ async function sendMessage() {
   agentEl.classList.add("streaming");
   input.value = ""; input.style.height = "auto"; $("chatSend").disabled = true;
 
-  let acc = "";
+  let acc = "";            // полный полученный с сервера текст
+  let shown = 0;           // сколько символов уже показано (посимвольная доводка)
+  let typing = false;
+  const render = (s) => { agentEl.innerHTML = mdLite(s); };  // mdLite экранирует html (см. mdLite)
+  // посимвольный вывод: показ догоняет буфер плавно, не зависит от рывков сети
+  const typer = () => {
+    if (shown < acc.length) {
+      shown += Math.max(1, Math.ceil((acc.length - shown) / 18));
+      render(acc.slice(0, shown));
+      box.scrollTop = box.scrollHeight;
+      requestAnimationFrame(typer);
+    } else { typing = false; }
+  };
+  const pump = () => { if (!typing) { typing = true; requestAnimationFrame(typer); } };
   const done = () => {
+    shown = acc.length; render(acc); box.scrollTop = box.scrollHeight;  // дописать остаток разом
     agentEl.classList.remove("streaming");
     streaming = false; hapticOk();
     const f = loadChat();
     f[f.length - 1].text = acc || "(пусто)";
     saveChat(f);
   };
-  const render = (s) => { agentEl.innerHTML = mdLite(s); };  // mdLite экранирует html (см. mdLite)
   const runStream = async () => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 120000);
@@ -613,8 +648,7 @@ async function sendMessage() {
         const { value, done: rdone } = await reader.read();
         if (rdone) break;
         acc += dec.decode(value, { stream: true });
-        render(acc);
-        box.scrollTop = box.scrollHeight;
+        pump();
       }
     } finally { clearTimeout(timer); }
   };
@@ -627,10 +661,9 @@ async function sendMessage() {
       agentEl.textContent = "просыпаюсь, секунду…";
       try { await fetch("/api/health", { cache: "no-store" }); } catch (_) {}
       await sleep(1800);
-      try { acc = ""; await runStream(); done(); return; }
+      try { acc = ""; shown = 0; await runStream(); done(); return; }
       catch (_) { acc = "связь сорвалась — попробуй ещё раз"; }
     }
-    render(acc);
     done();
   }
 }
