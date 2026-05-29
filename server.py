@@ -40,7 +40,8 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip("/")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
-OWNER_TG_ID = os.environ.get("OWNER_TG_ID", "").strip()           # telegram-id владельца → его Google-акк
+# telegram-id владельца → его Google-акк. Берём OWNER_TG_ID, иначе уже существующий TELEGRAM_USER_ID.
+OWNER_TG_ID = (os.environ.get("OWNER_TG_ID", "") or os.environ.get("TELEGRAM_USER_ID", "")).strip()
 OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "steadfast.sound001@gmail.com").strip().lower()
 
 
