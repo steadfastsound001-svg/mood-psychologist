@@ -247,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": blob}],
-                max_tokens=200, task="analysis",
+                max_tokens=200, task="fast",
             )
             raw = resp.content[0].text.strip()
             m = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
