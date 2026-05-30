@@ -30,7 +30,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=35">
+<!-- Telegram WebApp SDK — даёт window.Telegram.WebApp + initData для нативного входа в мини-аппе -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/style.css?v=36">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -275,6 +277,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=35"></script>
+<script src="/app.js?v=36"></script>
 </body>
 </html>
