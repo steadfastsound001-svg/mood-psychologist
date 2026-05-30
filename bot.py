@@ -112,6 +112,10 @@ def detect_webapp_url() -> str:
 
 
 WEBAPP_URL = detect_webapp_url()
+# URL мини-аппа = ПРОД (Render). Telegram инжектит initData в WebApp ТОЛЬКО если
+# приложение открыто кнопкой-меню/WebApp с этого origin. Туннель WEBAPP_URL для
+# локального «слепка», для входа в мини-апп нужен постоянный публичный адрес.
+MINIAPP_URL = os.environ.get("MINIAPP_URL", "").strip() or "https://moodmind-32at.onrender.com"
 
 MODEL = "claude-sonnet-4-6"
 HAIKU_MODEL = "claude-haiku-4-5"
@@ -1595,16 +1599,15 @@ async def cmd_dashboard(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _register_menu_button(app) -> None:
-    """Ставит кнопку меню рядом со скрепкой → открывает Mini App."""
-    if not WEBAPP_URL:
-        return
+    """Кнопка-меню рядом со скрепкой → открывает Mini App с ПРОДА.
+    Только так Telegram отдаёт initData → нативный вход без Google."""
     try:
         from telegram import MenuButtonWebApp
         await app.bot.set_chat_menu_button(
             chat_id=USER_ID,
-            menu_button=MenuButtonWebApp(text="MOOD", web_app=WebAppInfo(url=WEBAPP_URL)),
+            menu_button=MenuButtonWebApp(text="MOOD", web_app=WebAppInfo(url=MINIAPP_URL)),
         )
-        print(f"[web] menu button → {WEBAPP_URL}", flush=True)
+        print(f"[web] menu button → {MINIAPP_URL}", flush=True)
     except Exception as e:
         print(f"[web] не получилось установить menu button: {e}", flush=True)
 

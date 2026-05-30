@@ -23,7 +23,7 @@ import store
 import onboarding
 import stt
 from llm import Anthropic, stream_completion_sync
-from agent_core import user_system
+from agent_core import user_system, ANTI_AI
 
 client = Anthropic()  # для нестримовых вызовов (weekly/opener)
 
@@ -64,7 +64,7 @@ def _dyn_mood_compute(uid, entries):
                "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично). "
                "дай: note — одну короткую строку-резюме; desc — 2-3 предложения о том, как человек "
                "чувствовал себя эти 10 дней (что было в фокусе, какие колебания, на чём держался). "
-               "на «ты», строчные, тепло и по делу, без воды и без markdown. "
+               "на «ты», строчные, тепло и по делу, без воды и без markdown.\n\n" + ANTI_AI + "\n\n"
                "верни СТРОГО JSON: {\"score\": <int>, \"note\": \"<строка>\", \"desc\": \"<2-3 предложения>\"}")
         resp = client.messages.create(
             system=sys, messages=[{"role": "user", "content": blob}],
@@ -337,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             for delta in stream_completion_sync(
                 system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=220, task="dialog",
+                messages=messages, max_tokens=150, task="dialog",
             ):
                 acc.append(delta)
                 try:
@@ -410,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
                "**ориентир** — один мягкий, конкретный шаг на следующую неделю, 1 фраза\n\n"
                "правила: на «ты», строчные буквы, живой язык, без воды. жирным — только три заголовка блоков "
                "(**в фокусе**, **сдвиг**, **ориентир**), больше никакого markdown, ни тире-списков, ни цифр-пунктов. "
-               "только из реплик клиента, не выдумывай.")
+               "только из реплик клиента, не выдумывай.\n\n" + ANTI_AI)
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": blob}],
