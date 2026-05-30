@@ -25,6 +25,34 @@ def _default_model() -> str:
     return os.environ.get("LLM_MODEL", "deepseek/deepseek-v4-flash:free")
 
 
+# ───────────── OpenAI (платный, основной) ─────────────
+# Имя модели БЕЗ "/" = нативный OpenAI. Имя С "/" = OpenRouter (free fallback).
+def _openai_key() -> str:
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+def _openai_base() -> str:
+    return os.environ.get("OPENAI_BASE", "https://api.openai.com/v1")
+
+
+def _openai_model() -> str:
+    # качественные задачи (диалог, рассуждение, анализ портрета)
+    return os.environ.get("OPENAI_MODEL", "gpt-4.1").strip()
+
+
+def _openai_model_fast() -> str:
+    # дешёвые частые задачи (extract, чистка, роутер, фидбек)
+    return os.environ.get("OPENAI_MODEL_FAST", "gpt-4.1-mini").strip()
+
+
+# какой OpenAI-моделью крыть каждую задачу
+def _openai_model_for_task(task: str | None) -> str | None:
+    if not _openai_key():
+        return None
+    fast_tasks = {"fast", "consolidate"}
+    return _openai_model_fast() if task in fast_tasks else _openai_model()
+
+
 # Specialist routing: разные модели под разные задачи.
 # Каждая лучше своих сородичей в своей нише — synergy без оплаты.
 TASK_MODELS = {
@@ -58,6 +86,55 @@ def _fallback_models() -> list[str]:
         if m not in out:
             out.append(m)
     return out
+
+
+def _chain(task: str | None, model: str | None) -> list[str]:
+    """Единая цепочка моделей: OpenAI (платный) первым, затем free OpenRouter.
+    Если OpenAI упал / нет ключа / кончился баланс — автоматически идём по free."""
+    out: list[str] = []
+    om = _openai_model_for_task(task)        # None если нет OPENAI_API_KEY
+    if om:
+        out.append(om)
+    if task:                                  # переданный task важнее claude-имени
+        pref = _model_for_task(task)
+        if pref and pref not in out:
+            out.append(pref)
+    if model and model not in out:
+        out.append(model)
+    for m in _fallback_models():
+        if m not in out:
+            out.append(m)
+    # claude-* имена не поддерживаем; нативные OpenAI-модели — только если есть ключ
+    return [m for m in out
+            if m and not m.startswith("claude-")
+            and ("/" in m or _openai_key())]
+
+
+def _provider_headers(model: str, stream: bool = False):
+    """(url, headers) под нужный провайдер. None — если для модели нет ключа."""
+    if "/" in model:                          # OpenRouter
+        key = _api_key()
+        if not key:
+            return None
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://t.me/personal-psychologist",
+            "X-Title": "Psychologist Bot",
+        }
+        base = _base_url()
+    else:                                     # нативный OpenAI
+        key = _openai_key()
+        if not key:
+            return None
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        base = _openai_base()
+    if stream:
+        headers["Accept"] = "text/event-stream"
+    return f"{base}/chat/completions", headers
 
 
 class _TextBlock:
@@ -117,11 +194,6 @@ class _Messages:
         task: str | None = None,
         **_ignored,
     ) -> _Response:
-        # task-routing имеет приоритет над claude-* именами
-        if task:
-            preferred = _model_for_task(task)
-            if preferred:
-                model = preferred
         sys_text = _flatten_system(system)
         chat = []
         if sys_text:
@@ -129,14 +201,7 @@ class _Messages:
         for m in messages or []:
             chat.append({"role": m.get("role", "user"), "content": _flatten_content(m.get("content", ""))})
 
-        fb = _fallback_models()
-        models = [model] if model and model not in fb else []
-        for m in fb:
-            if m not in models:
-                models.append(m)
-        # Если передали Anthropic-имя (claude-*), просто игнорируем и идём по фолбэкам.
-        models = [m for m in models if not (m and m.startswith("claude-"))]
-
+        models = _chain(task, model)
         last_err: Exception | None = None
         for m in models:
             try:
@@ -144,31 +209,22 @@ class _Messages:
             except Exception as e:
                 last_err = e
                 continue
-        raise RuntimeError(f"все модели OpenRouter не ответили: {last_err}")
+        raise RuntimeError(f"все модели не ответили: {last_err}")
 
     def _post(self, model: str, chat: list[dict], max_tokens: int) -> _Response:
-        key = _api_key()
-        if not key:
-            raise RuntimeError("OPENROUTER_API_KEY не задан в .env")
-        body = {
-            "model": model,
-            "messages": chat,
-            "max_tokens": max_tokens,
-        }
-        headers = {
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://t.me/personal-psychologist",
-            "X-Title": "Psychologist Bot",
-        }
+        ph = _provider_headers(model)
+        if ph is None:
+            raise RuntimeError(f"нет ключа для модели {model}")
+        url, headers = ph
+        body = {"model": model, "messages": chat, "max_tokens": max_tokens}
         with httpx.Client(timeout=180) as cli:
-            r = cli.post(f"{_base_url()}/chat/completions", json=body, headers=headers)
+            r = cli.post(url, json=body, headers=headers)
             if r.status_code >= 400:
-                raise RuntimeError(f"openrouter {r.status_code}: {r.text[:300]}")
+                raise RuntimeError(f"{model} {r.status_code}: {r.text[:300]}")
             data = r.json()
             choices = data.get("choices") or []
             if not choices:
-                raise RuntimeError(f"openrouter empty: {str(data)[:300]}")
+                raise RuntimeError(f"{model} empty: {str(data)[:300]}")
             text = (choices[0].get("message") or {}).get("content") or ""
             return _Response(text=text, model=model)
 
@@ -194,11 +250,7 @@ def stream_completion_sync(
     model: str | None = None,
     task: str | None = None,
 ):
-    """Синхронный генератор текстовых дельт от OpenRouter (SSE), с fallback по моделям."""
-    if task:
-        preferred = _model_for_task(task)
-        if preferred:
-            model = preferred
+    """Синхронный генератор текстовых дельт (SSE), OpenAI→OpenRouter fallback по моделям."""
     sys_text = _flatten_system(system)
     chat = []
     if sys_text:
@@ -206,26 +258,13 @@ def stream_completion_sync(
     for m in messages or []:
         chat.append({"role": m.get("role", "user"), "content": _flatten_content(m.get("content", ""))})
 
-    fb = _fallback_models()
-    models = [model] if model and model not in fb else []
-    for m in fb:
-        if m not in models:
-            models.append(m)
-    models = [m for m in models if not (m and m.startswith("claude-"))]
-
-    key = _api_key()
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY не задан в .env")
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://t.me/personal-psychologist",
-        "X-Title": "Psychologist Bot",
-        "Accept": "text/event-stream",
-    }
-    url = f"{_base_url()}/chat/completions"
+    models = _chain(task, model)
     last_err: Exception | None = None
     for m in models:
+        ph = _provider_headers(m, stream=True)
+        if ph is None:
+            continue
+        url, headers = ph
         body = {"model": m, "messages": chat, "max_tokens": max_tokens, "stream": True}
         got_any = False
         try:
@@ -268,11 +307,7 @@ async def stream_completion(
     model: str | None = None,
     task: str | None = None,
 ):
-    """Async-генератор дельт текста от OpenRouter (SSE), с fallback по моделям."""
-    if task:
-        preferred = _model_for_task(task)
-        if preferred:
-            model = preferred
+    """Async-генератор дельт текста (SSE), OpenAI→OpenRouter fallback по моделям."""
     sys_text = _flatten_system(system)
     chat = []
     if sys_text:
@@ -280,27 +315,13 @@ async def stream_completion(
     for m in messages or []:
         chat.append({"role": m.get("role", "user"), "content": _flatten_content(m.get("content", ""))})
 
-    fb = _fallback_models()
-    models = [model] if model and model not in fb else []
-    for m in fb:
-        if m not in models:
-            models.append(m)
-    models = [m for m in models if not (m and m.startswith("claude-"))]
-
-    key = _api_key()
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY не задан в .env")
-
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://t.me/personal-psychologist",
-        "X-Title": "Psychologist Bot",
-        "Accept": "text/event-stream",
-    }
-    url = f"{_base_url()}/chat/completions"
+    models = _chain(task, model)
     last_err: Exception | None = None
     for m in models:
+        ph = _provider_headers(m, stream=True)
+        if ph is None:
+            continue
+        url, headers = ph
         body = {"model": m, "messages": chat, "max_tokens": max_tokens, "stream": True}
         try:
             async with httpx.AsyncClient(timeout=180) as cli:
