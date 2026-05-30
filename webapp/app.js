@@ -265,7 +265,7 @@ function initApp() {
     appInited = true;
     injectIcons();
     document.querySelectorAll(".tab-item").forEach((b) => {
-      b.addEventListener("click", () => { haptic("medium"); switchView(b.dataset.view); });
+      b.addEventListener("click", () => { haptic("medium"); switchView(b.dataset.view, true); });
     });
     setupChat();
     $("profSave").onclick = saveProfileInfo;
@@ -298,17 +298,53 @@ function initApp() {
     setupInstallPrompt();
     loadExtraTests();
   }
+  setupSwipe();
   switchView("chat");
 }
 
-function switchView(view) {
+const VIEWS = ["chat", "diary", "profile"];   // порядок = порядок вкладок в навигации
+let curView = "chat";
+const viewEl = (v) => $(v === "chat" ? "chatView" : v === "diary" ? "diaryView" : "profileView");
+
+function switchView(view, animate) {
+  const dir = VIEWS.indexOf(view) - VIEWS.indexOf(curView); // >0 — вправо, <0 — влево
   document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   $("chatView").hidden = view !== "chat";
   $("profileView").hidden = view !== "profile";
   $("diaryView").hidden = view !== "diary";
+  if (animate && dir !== 0) {
+    const el = viewEl(view);
+    el.classList.remove("view-slide-right", "view-slide-left");
+    void el.offsetWidth;                       // рестарт анимации
+    el.classList.add(dir > 0 ? "view-slide-right" : "view-slide-left");
+    setTimeout(() => el.classList.remove("view-slide-right", "view-slide-left"), 300);
+  }
+  curView = view;
   if (view === "profile") loadProfile();
   if (view === "chat") hydrateChat();
   if (view === "diary") loadDiary();
+}
+
+/* свайп между вкладками: горизонтальный жест → соседняя вкладка со слайдом */
+function setupSwipe() {
+  const app = $("app");
+  let x0 = null, y0 = null, t0 = 0;
+  app.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) { x0 = null; return; }
+    // не перехватываем жест на интерактиве и горизонтально-скроллимых зонах
+    if (e.target.closest("input, textarea, .mood-chart, .trend-wrap, .diary-menu, .test-modal")) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+  }, { passive: true });
+  app.addEventListener("touchend", (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0, dt = Date.now() - t0;
+    x0 = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.7 && dt < 600) {
+      const i = VIEWS.indexOf(curView);
+      if (dx < 0 && i < VIEWS.length - 1) { haptic(); switchView(VIEWS[i + 1], true); }
+      else if (dx > 0 && i > 0) { haptic(); switchView(VIEWS[i - 1], true); }
+    }
+  }, { passive: true });
 }
 
 /* история чата живёт в БД (одна на все устройства). локалка — лишь мгновенный кэш.

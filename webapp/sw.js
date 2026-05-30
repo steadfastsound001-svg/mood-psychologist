@@ -4,7 +4,7 @@
    - /api/* — network-only (всегда свежее, без offline-кеша)
    - index.html — network-first c fallback на cache (для offline shell)
 */
-const CACHE = "mood-v13";
+const CACHE = "mood-v14";
 // app.js/style.css НЕ прекэшируем — они версионируются (?v=) и идут network-first.
 const STATIC = [
   "/manifest.json",
