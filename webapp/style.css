@@ -1162,6 +1162,21 @@ a:focus:not(:focus-visible),
   white-space: pre-wrap; margin-top: 4px; min-height: 8px;
 }
 .weekly-box:empty::before { content: "нажми кнопку — психолог соберёт картину недели"; color: var(--hint); }
+.weekly-box b { color: var(--accent, var(--text)); font-weight: 600; }
+
+/* лайк + фидбек на портрет (агент учится) */
+.pf-like { margin-top: 12px; }
+.pf-like-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 1px solid var(--border, rgba(127,127,127,.28));
+  color: var(--text); padding: 8px 15px; border-radius: 999px;
+  font-size: var(--t-footnote); font-family: inherit; cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+}
+.pf-like-btn:active { transform: scale(.95); }
+.pf-heart { color: #e0566a; font-size: 1.05em; line-height: 1; }
+.pf-box { margin-top: 12px; }
+.pf-box-t { font-size: var(--t-footnote); color: var(--hint); margin-bottom: 7px; line-height: 1.45; }
 
 /* ═══════════ v25: темы, дневник, монотонные символы ═══════════ */
 

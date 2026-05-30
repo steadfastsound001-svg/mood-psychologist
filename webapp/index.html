@@ -32,7 +32,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
 <!-- Telegram WebApp SDK — даёт window.Telegram.WebApp + initData для нативного входа в мини-аппе -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="/style.css?v=38">
+<link rel="stylesheet" href="/style.css?v=39">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -146,10 +146,27 @@
       <div class="dynmood-foot" id="dynMoodFoot"></div>
     </section>
 
+    <!-- итоги недели -->
+    <section class="card" id="weeklyCard" hidden>
+      <h3>итоги недели</h3>
+      <div class="card-note">психолог подводит черту по твоим разговорам за неделю</div>
+      <div id="weeklyBox" class="weekly-box"></div>
+      <button class="btn-ghost full" id="weeklyBtn" style="margin-top:10px">собрать итоги недели</button>
+    </section>
+
     <!-- портрет -->
     <section class="card">
       <h3>твой портрет</h3>
       <div id="profCompiled" class="prof-compiled">портрет ещё не собран</div>
+      <div class="pf-like" id="pfLike" hidden>
+        <button class="pf-like-btn" id="pfLikeBtn"><span class="pf-heart">♥</span> нравится портрет</button>
+        <div class="pf-box" id="pfBox" hidden>
+          <div class="pf-box-t">что зашло, а что нет? психолог учится на этом и напишет следующий портрет точнее</div>
+          <textarea class="field area" id="pfText" rows="3" placeholder="например: в точку про слепое пятно, но «опора» — мимо…"></textarea>
+          <button class="btn-primary" id="pfSend" style="margin-top:8px">отправить психологу</button>
+          <div class="prof-saved" id="pfDone" hidden>спасибо — учту и перепишу портрет точнее ✓</div>
+        </div>
+      </div>
       <button class="btn-primary" id="profCompile" style="margin-top:14px">собрать портрет</button>
       <button class="btn-ghost full" id="profExport" style="margin-top:10px" hidden>поделиться портретом</button>
       <div class="prof-saved" id="profCompiling" hidden>собираю…</div>
@@ -166,14 +183,6 @@
     <section class="card">
       <h3>аналитика</h3>
       <div id="analyticsBox"></div>
-    </section>
-
-    <!-- итоги недели -->
-    <section class="card" id="weeklyCard" hidden>
-      <h3>итоги недели</h3>
-      <div class="card-note">психолог подводит черту по твоим разговорам</div>
-      <div id="weeklyBox" class="weekly-box"></div>
-      <button class="btn-ghost full" id="weeklyBtn" style="margin-top:10px">собрать итоги недели</button>
     </section>
 
     <!-- досье (сворачивается; «добавить о себе» внутри) -->
@@ -277,6 +286,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=38"></script>
+<script src="/app.js?v=39"></script>
 </body>
 </html>

@@ -124,6 +124,9 @@ _SCHEMA = [
     """CREATE TABLE IF NOT EXISTS diary_entries(
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
       text TEXT NOT NULL, raw TEXT DEFAULT '', ts REAL)""",
+    """CREATE TABLE IF NOT EXISTS portrait_feedback(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+      liked INTEGER DEFAULT 1, text TEXT DEFAULT '', ts REAL)""",
 ]
 
 
@@ -431,6 +434,31 @@ def diary_text_blob(user_id: int, limit: int = 200, cap: int = 40000) -> str:
         out.append(chunk)
         total += len(chunk)
     return "\n".join(out)
+
+
+# ───────────── фидбек на портрет (агент учится писать портреты лучше) ─────────────
+
+def add_portrait_feedback(user_id: int, liked: bool, text: str = "") -> None:
+    execute("INSERT INTO portrait_feedback(user_id, liked, text, ts) VALUES(?,?,?,?)",
+            (user_id, 1 if liked else 0, (text or "").strip()[:2000], time.time()))
+
+
+def portrait_feedback_blob(user_id: int, limit: int = 25) -> str:
+    """Сводка отзывов клиента на его портреты — подаётся при пересборке, чтобы агент
+    подстраивался под то, что человеку заходит, и писал точнее."""
+    rows = query(
+        "SELECT liked, text FROM portrait_feedback WHERE user_id=? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    )
+    if not rows:
+        return ""
+    likes = sum(1 for r in rows if r.get("liked"))
+    parts = [f"отзывов на прошлые портреты: {len(rows)} (понравилось: {likes}, не зашло: {len(rows) - likes})."]
+    for r in rows:
+        mark = "понравилось" if r.get("liked") else "не зашло"
+        t = (r.get("text") or "").strip()
+        parts.append(f"[{mark}] {t}" if t else f"[{mark}]")
+    return "\n".join(parts)
 
 
 # ───────────── stats (сеансы / возраст аккаунта) ─────────────

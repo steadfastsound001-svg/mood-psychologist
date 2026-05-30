@@ -271,6 +271,8 @@ function initApp() {
     $("profSave").onclick = saveProfileInfo;
     $("profCompile").onclick = compilePortrait;
     $("profExport").onclick = exportPortrait;
+    $("pfLikeBtn").onclick = () => { haptic(); const b = $("pfBox"); b.hidden = !b.hidden; if (!b.hidden) $("pfText").focus(); };
+    $("pfSend").onclick = sendPortraitFeedback;
     $("weeklyBtn").onclick = genWeekly;
     $("logoutBtn").onclick = () => { clearToken(); location.reload(); };
     $("fileBtn").onclick = () => $("fileInput").click();
@@ -813,6 +815,12 @@ function setPortrait(compiled) {
   $("profCompile").textContent = c ? "пересобрать портрет" : "собрать портрет";
   $("profCompile").hidden = false;
   $("profExport").hidden = !c;
+  // лайк/фидбек на портрет — только когда портрет есть
+  const pf = $("pfLike");
+  if (pf) {
+    pf.hidden = !c;
+    if (!c) { $("pfBox").hidden = true; $("pfDone").hidden = true; }
+  }
 }
 async function loadProfile() {
   $("profName").textContent = window.__me?.name || "—";
@@ -1132,6 +1140,24 @@ async function exportPortrait() {
   const a = document.createElement("a"); a.href = url; a.download = "mood-portrait.png"; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   hapticOk();
+}
+
+/* ── фидбек на портрет: агент учится писать точнее ── */
+async function sendPortraitFeedback() {
+  const btn = $("pfSend"), txt = $("pfText");
+  const text = (txt.value || "").trim();
+  btn.disabled = true; btn.textContent = "отправляю…";
+  try {
+    await api("/api/profile/feedback", { method: "POST", body: { liked: true, text } });
+    txt.value = "";
+    $("pfDone").hidden = false;
+    hapticOk();
+    setTimeout(() => { $("pfBox").hidden = true; $("pfDone").hidden = true; }, 2600);
+  } catch (e) {
+    $("pfDone").hidden = false; $("pfDone").textContent = "не удалось: " + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "отправить психологу";
+  }
 }
 
 /* ── итоги недели ── */

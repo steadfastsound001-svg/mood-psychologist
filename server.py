@@ -129,7 +129,8 @@ def _compile_inputs(uid):
     except Exception:
         answers = {}
     return (answers, prof.get("raw_info") or "", store.get_extra_tests(uid),
-            store.documents_text(uid), store.diary_text_blob(uid))
+            store.documents_text(uid), store.diary_text_blob(uid),
+            store.portrait_feedback_blob(uid))
 
 
 def _all_tests_done(uid):
@@ -402,9 +403,14 @@ class Handler(BaseHTTPRequestHandler):
         if len(user_texts) < 3:
             return ""
         blob = "\n".join(f"— {t}" for t in user_texts[-40:])
-        sys = ("ты психолог. на входе — реплики клиента за неделю. напиши короткие тёплые итоги недели "
-               "(3-5 строк, на «ты», строчные, без воды и без markdown кроме **жирного**): что было в фокусе, "
-               "какой сдвиг заметен, один мягкий ориентир на следующую неделю. только из реплик, не выдумывай.")
+        sys = ("ты психолог. на входе — реплики клиента за неделю. напиши тёплые итоги недели.\n\n"
+               "формат строго такой, ровно 3 блока, между блоками — пустая строка:\n"
+               "**в фокусе** — что занимало тебя на этой неделе, 1-2 фразы\n\n"
+               "**сдвиг** — что изменилось или начало меняться, 1-2 фразы\n\n"
+               "**ориентир** — один мягкий, конкретный шаг на следующую неделю, 1 фраза\n\n"
+               "правила: на «ты», строчные буквы, живой язык, без воды. жирным — только три заголовка блоков "
+               "(**в фокусе**, **сдвиг**, **ориентир**), больше никакого markdown, ни тире-списков, ни цифр-пунктов. "
+               "только из реплик клиента, не выдумывай.")
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": blob}],
@@ -622,6 +628,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, {"ok": True, "compiled": compiled}); return
                 except Exception as e:
                     self._json(500, {"error": str(e)}); return
+
+            if u.path == "/api/profile/feedback":
+                liked = bool(body.get("liked", True))
+                fb_text = (body.get("text") or "").strip()[:2000]
+                store.add_portrait_feedback(uid, liked, fb_text)
+                # пересобираем портрет в фоне — агент учтёт отзыв и напишет точнее
+                threading.Thread(target=_recompile_bg, args=(uid,), daemon=True).start()
+                self._json(200, {"ok": True}); return
 
             if u.path == "/api/profile/info":
                 store.save_raw_info(uid, body.get("raw_info") or "")

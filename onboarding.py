@@ -128,12 +128,14 @@ COMPILE_PROMPT = """ты — психолог высокого класса, к�
 — инсайты СТРОГО из данных — связывай факты, но не выдумывай того, чего нет
 — бей точно и глубоко, но без жестокости и без диагнозов-ярлыков
 — не давай советов и инструкций «как с тобой работать»
+— если есть отзывы на прошлые портреты — это твой главный ориентир: усиль то, что человеку зашло, и поменяй подход там, где не зашло; видишь повторяющийся тренд в отзывах — перестрой стиль под него
 — никаких таблиц, ##, | — только **жирное** и эмодзи в заголовке
 
 выдай только портрет."""
 
 
-def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: str, diary: str = "") -> str:
+def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: str,
+                  diary: str = "", feedback: str = "") -> str:
     lines = []
     for qd in QUESTIONS:
         qid = qd["id"]
@@ -165,14 +167,17 @@ def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: s
         blob += f"\n\n[материалы клиента — досье]\n{documents.strip()[:50000]}"
     if (diary or "").strip():
         blob += f"\n\n[записи дневника — как человек живёт и что чувствует день за днём]\n{diary.strip()[:40000]}"
+    if (feedback or "").strip():
+        blob += ("\n\n[как клиент реагировал на ПРОШЛЫЕ свои портреты — учись на этом, "
+                 "усиливай то, что заходит, и меняй то, что не зашло]\n" + feedback.strip()[:4000])
     return blob
 
 
 def compile_profile(answers: dict, raw_info: str = "", extra: dict | None = None,
-                    documents: str = "", diary: str = "") -> str:
+                    documents: str = "", diary: str = "", feedback: str = "") -> str:
     """answers: {question_id: value}. Возвращает клиентский портрет.
-    Аккумулирует ВСЕ источники: тесты + досье + дневник + что человек сам сказал."""
-    blob = _answers_blob(answers, raw_info, extra, documents, diary)
+    Аккумулирует ВСЕ источники: тесты + досье + дневник + что человек сам сказал + отзывы на портреты."""
+    blob = _answers_blob(answers, raw_info, extra, documents, diary, feedback)
     resp = client.messages.create(
         max_tokens=2200,
         system=COMPILE_PROMPT,
