@@ -37,12 +37,12 @@ def _openai_base() -> str:
 
 def _openai_model() -> str:
     # качественные задачи (диалог, рассуждение, анализ портрета)
-    return os.environ.get("OPENAI_MODEL", "gpt-4.1").strip()
+    return os.environ.get("OPENAI_MODEL", "gpt-5").strip()
 
 
 def _openai_model_fast() -> str:
     # дешёвые частые задачи (extract, чистка, роутер, фидбек)
-    return os.environ.get("OPENAI_MODEL_FAST", "gpt-4.1-mini").strip()
+    return os.environ.get("OPENAI_MODEL_FAST", "gpt-5-mini").strip()
 
 
 # какой OpenAI-моделью крыть каждую задачу
@@ -108,6 +108,27 @@ def _chain(task: str | None, model: str | None) -> list[str]:
     return [m for m in out
             if m and not m.startswith("claude-")
             and ("/" in m or _openai_key())]
+
+
+def _is_reasoning_openai(model: str) -> bool:
+    """gpt-5* и o-series — reasoning-модели OpenAI: другой параметр лимита токенов."""
+    if "/" in model:
+        return False
+    m = model.lower()
+    return (m.startswith("gpt-5") or m.startswith("o1")
+            or m.startswith("o3") or m.startswith("o4") or m.startswith("o5"))
+
+
+def _token_body(model: str, max_tokens: int) -> dict:
+    """Reasoning-модели хотят max_completion_tokens (+бюджет на reasoning) и reasoning_effort.
+    Остальные — обычный max_tokens. minimal по умолчанию: для чата-психолога reasoning не нужен."""
+    if _is_reasoning_openai(model):
+        body = {"max_completion_tokens": max_tokens + 256}
+        eff = os.environ.get("OPENAI_REASONING_EFFORT", "minimal").strip()
+        if eff:
+            body["reasoning_effort"] = eff
+        return body
+    return {"max_tokens": max_tokens}
 
 
 def _provider_headers(model: str, stream: bool = False):
@@ -216,7 +237,7 @@ class _Messages:
         if ph is None:
             raise RuntimeError(f"нет ключа для модели {model}")
         url, headers = ph
-        body = {"model": model, "messages": chat, "max_tokens": max_tokens}
+        body = {"model": model, "messages": chat, **_token_body(model, max_tokens)}
         with httpx.Client(timeout=180) as cli:
             r = cli.post(url, json=body, headers=headers)
             if r.status_code >= 400:
@@ -265,7 +286,7 @@ def stream_completion_sync(
         if ph is None:
             continue
         url, headers = ph
-        body = {"model": m, "messages": chat, "max_tokens": max_tokens, "stream": True}
+        body = {"model": m, "messages": chat, "stream": True, **_token_body(m, max_tokens)}
         got_any = False
         try:
             with httpx.Client(timeout=180) as cli:
@@ -322,7 +343,7 @@ async def stream_completion(
         if ph is None:
             continue
         url, headers = ph
-        body = {"model": m, "messages": chat, "max_tokens": max_tokens, "stream": True}
+        body = {"model": m, "messages": chat, "stream": True, **_token_body(m, max_tokens)}
         try:
             async with httpx.AsyncClient(timeout=180) as cli:
                 async with cli.stream("POST", url, json=body, headers=headers) as r:
