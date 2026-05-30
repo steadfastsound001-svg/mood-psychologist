@@ -874,7 +874,20 @@ function renderAllStats(s) {
   renderMood(s);
   renderTests(s);
   renderAnalytics(s);
+  gatePortrait(s);
   if ($("weeklyCard")) $("weeklyCard").hidden = !(s && s.sessions >= 3);
+}
+
+/* портрет под замком, пока не пройдены все тесты */
+function gatePortrait(s) {
+  if (!s || s.all_tests_done) {
+    if (s) setPortrait(window.__portraitText || localStorage.getItem(PROF_KEY()) || "");
+    return;
+  }
+  const left = (s.tests_total || 0) - (s.tests_passed || 0);
+  $("profCompiled").textContent = `🔒 портрет под замком. пройди все тесты ниже (первичный + доп) — осталось ${left} из ${s.tests_total}. на их основе психолог соберёт глубокий разбор тебя.`;
+  $("profCompile").hidden = true;
+  $("profExport").hidden = true;
 }
 async function loadStats() {
   let cached = null;
@@ -937,7 +950,15 @@ function renderMood(s) {
   const locked = $("moodLocked"), ready = $("moodReady");
   if (!s || s.mood == null) {
     locked.hidden = false; ready.hidden = true;
-    if (s) $("moodProg").textContent = `осталось ${s.mood_remaining} ${plural(s.mood_remaining, "сеанс", "сеанса", "сеансов")}`;
+    const t = $("moodLocked").querySelector(".locked-t");
+    if (s && !s.all_tests_done) {
+      const left = (s.tests_total || 0) - (s.tests_passed || 0);
+      if (t) t.textContent = "оценка MOOD под замком";
+      $("moodProg").textContent = `пройди все тесты для анализа · осталось ${left} из ${s.tests_total}`;
+    } else if (s) {
+      if (t) t.textContent = "оценка MOOD";
+      $("moodProg").textContent = "скоро — нужно чуть больше данных";
+    }
     return;
   }
   locked.hidden = true; ready.hidden = false;

@@ -132,9 +132,22 @@ def _compile_inputs(uid):
             store.documents_text(uid), store.diary_text_blob(uid))
 
 
+def _all_tests_done(uid):
+    """Портрет/MOOD открываются только когда пройдены первичный + все доп-тесты."""
+    prof = store.get_profile(uid)
+    try:
+        answers = json.loads(prof.get("test_answers") or "{}")
+    except Exception:
+        answers = {}
+    extra = store.get_extra_tests(uid)
+    return bool(answers) and all(t["id"] in extra for t in onboarding.EXTRA_TESTS)
+
+
 def _recompile_bg(uid):
     """Фоновая пересборка портрета из ВСЕХ источников (тесты, досье, дневник, raw_info)."""
     try:
+        if not _all_tests_done(uid):   # портрет не строим, пока не пройдены все тесты
+            return
         compiled = onboarding.compile_profile(*_compile_inputs(uid))
         if compiled:
             store.set_compiled(uid, compiled)
@@ -271,6 +284,14 @@ class Handler(BaseHTTPRequestHandler):
         sessions = st["sessions"]
         days = st["days_since_reg"]
         streak = st.get("streak", 0)
+        # анализ (портрет + MOOD) открывается только когда пройдены ВСЕ тесты:
+        # первичный + все доп-тесты.
+        onboard_done = bool(answers)
+        extra_total = len(onboarding.EXTRA_TESTS)
+        extra_done = sum(1 for t in onboarding.EXTRA_TESTS if t["id"] in extra)
+        all_tests_done = onboard_done and extra_done == extra_total
+        tests_total = extra_total + 1
+        tests_passed = extra_done + (1 if onboard_done else 0)
         # итоговый MOOD = база из тестов + актуальное состояние из дневника и разговоров.
         # тесты дают устойчивую черту, dyn-mood (LLM по дневнику+чату) — текущее состояние.
         test_mood = onboarding.compute_mood(answers, extra) if sessions >= MOOD_MIN_SESSIONS else None
@@ -282,6 +303,8 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(dyn_score, (int, float)):
             parts.append((float(dyn_score), 0.5))           # актуальное состояние (дневник+терапия)
         mood = round(sum(v * w for v, w in parts) / sum(w for _, w in parts)) if parts else None
+        if not all_tests_done:
+            mood = None              # MOOD закрыт, пока не пройдены все тесты
         portrait_done = bool((prof.get("compiled") or "").strip())
         tests_done = {t["id"]: (t["id"] in extra) for t in onboarding.EXTRA_TESTS}
         return {
@@ -293,7 +316,9 @@ class Handler(BaseHTTPRequestHandler):
             "tests": tests_done, "portrait": portrait_done,
             "analytics_unlocked": days >= ANALYTICS_MIN_DAYS,
             "analytics_in_days": max(0, round(ANALYTICS_MIN_DAYS - days, 1)),
-            "onboard_test_done": bool(answers),
+            "onboard_test_done": onboard_done,
+            "all_tests_done": all_tests_done,
+            "tests_total": tests_total, "tests_passed": tests_passed,
         }
 
     def _chat_stream(self, uid, text):
@@ -589,6 +614,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True}); return
 
             if u.path == "/api/profile/compile":
+                if not _all_tests_done(uid):
+                    self._json(403, {"error": "пройди все тесты — тогда соберём портрет"}); return
                 try:
                     compiled = onboarding.compile_profile(*_compile_inputs(uid))
                     store.set_compiled(uid, compiled)
