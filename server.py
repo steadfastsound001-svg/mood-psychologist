@@ -271,7 +271,17 @@ class Handler(BaseHTTPRequestHandler):
         sessions = st["sessions"]
         days = st["days_since_reg"]
         streak = st.get("streak", 0)
-        mood = onboarding.compute_mood(answers, extra) if sessions >= MOOD_MIN_SESSIONS else None
+        # итоговый MOOD = база из тестов + актуальное состояние из дневника и разговоров.
+        # тесты дают устойчивую черту, dyn-mood (LLM по дневнику+чату) — текущее состояние.
+        test_mood = onboarding.compute_mood(answers, extra) if sessions >= MOOD_MIN_SESSIONS else None
+        dyn = store.get_dyn_mood(uid)
+        dyn_score = dyn.get("score") if dyn else None
+        parts = []
+        if test_mood is not None:
+            parts.append((test_mood, 0.5))                  # черта/базлайн
+        if isinstance(dyn_score, (int, float)):
+            parts.append((float(dyn_score), 0.5))           # актуальное состояние (дневник+терапия)
+        mood = round(sum(v * w for v, w in parts) / sum(w for _, w in parts)) if parts else None
         portrait_done = bool((prof.get("compiled") or "").strip())
         tests_done = {t["id"]: (t["id"] in extra) for t in onboarding.EXTRA_TESTS}
         return {
