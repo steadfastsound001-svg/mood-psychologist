@@ -105,6 +105,13 @@ function mdLite(text) {
   return out;
 }
 
+/* реально ли мы внутри Telegram. SDK telegram-web-app.js в ОБЫЧНОМ браузере
+   тоже создаёт window.Telegram.WebApp с рабочим openLink — поэтому проверяем
+   initData/platform, а не наличие методов. */
+function isInTelegram() {
+  return !!(tg && ((tg.initData && tg.initData.length > 0) || (tg.platform && tg.platform !== "unknown")));
+}
+
 /* ───────── GATE ───────── */
 async function boot() {
   // токен из Google-редиректа: /?token=...&onb=0
@@ -143,7 +150,7 @@ async function boot() {
 function initAuth() {
   const gbtn = $("googleBtn");
   if (!gbtn) return;
-  const inTG = !!(tg && typeof tg.openLink === "function");
+  const inTG = isInTelegram();
   if (inTG) {
     // Google блокирует OAuth внутри Telegram-webview → уводим всё приложение в обычный браузер
     gbtn.innerHTML = '<span class="g-icon">G</span> войти в браузере';
