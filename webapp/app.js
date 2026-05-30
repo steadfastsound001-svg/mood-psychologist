@@ -23,6 +23,13 @@ const ICONS = {
   "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
   "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  "info": '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  // монохромные лица настроения (единый размер 24×24)
+  "face-1": '<circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><path d="M7.5 8 10 9"/><path d="m14 9 2.5-1"/><path d="M9 10h.01"/><path d="M15 10h.01"/>',
+  "face-2": '<circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+  "face-3": '<circle cx="12" cy="12" r="10"/><path d="M8 15h8"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+  "face-4": '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+  "face-5": '<circle cx="12" cy="12" r="10"/><path d="M18 13a6 6 0 0 1-12 0Z"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
 };
 function ico(name) {
   return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
@@ -270,7 +277,12 @@ function initApp() {
       dh.setAttribute("aria-expanded", c.classList.contains("collapsed") ? "false" : "true");
     };
     $("tmClose").onclick = closeTest;
-    document.addEventListener("click", () => document.querySelectorAll(".diary-menu").forEach((m) => { m.hidden = true; }));
+    const mib = $("moodInfoBtn");
+    if (mib) mib.onclick = (e) => { e.stopPropagation(); haptic(); const b = $("moodInfo"); b.innerHTML = mdLite(MOOD_EXPLAIN); b.hidden = !b.hidden; };
+    document.addEventListener("click", () => {
+      document.querySelectorAll(".diary-menu").forEach((m) => { m.hidden = true; });
+      const mi = $("moodInfo"); if (mi) mi.hidden = true;
+    });
     setupThemes();
     setupInstallPrompt();
     loadExtraTests();
@@ -442,7 +454,7 @@ function moodSymbolForTs(ts) {
   const row = hist.find((h) => h.day === day);
   if (!row) return "";
   const idx = PULSE_SCORES.indexOf(row.score);
-  return idx >= 0 ? PULSE[idx].e : "";
+  return idx >= 0 ? PULSE[idx].ic : "";   // имя иконки-лица
 }
 
 let diaryEditId = null;
@@ -463,7 +475,7 @@ function renderDiary(entries) {
     const editing = diaryEditId === e.id;
     el.innerHTML = `
       <div class="diary-head">
-        <div class="diary-date">${sym ? `<span class="diary-mood">${sym}</span>` : ""}${date}</div>
+        <div class="diary-date">${sym ? `<span class="diary-mood">${ico(sym)}</span>` : ""}${date}</div>
         <button class="diary-menu-btn" title="ещё">⋮</button>
         <div class="diary-menu" hidden>
           <button data-act="edit">редактировать</button>
@@ -814,19 +826,16 @@ async function loadProfile() {
 }
 
 /* динамичный MOOD — настрой за 10 дней по дневнику */
-async function loadDynMood(tries = 0) {
-  const card = $("dynMoodCard");
-  if (!card) return;
-  let d;
-  try { d = await api("/api/v2/dynamic-mood", { timeout: 15000 }); } catch (_) { d = null; }
+const DYN_KEY = () => "mood_dyn_" + (window.__me?.id || "x");
+function renderDynMood(d, tries = 0) {
   const num = $("dynMoodNum"), bar = $("dynMoodBar"), note = $("dynMoodNote"), foot = $("dynMoodFoot"), desc = $("dynMoodDesc");
+  if (!num) return;
   if (!d || d.score == null) {
     num.textContent = "—";
     bar.style.width = "0%";
     note.textContent = (d && d.note) || "веди дневник — настрой посчитается за 10 дней";
     if (desc) desc.textContent = "";
     foot.textContent = "";
-    // пока считается в фоне — мягко перепроверяем, пока пользователь на вкладке
     if (d && d.pending && tries < 5) {
       setTimeout(() => { if (!$("profileView").hidden) loadDynMood(tries + 1); }, 12000);
     }
@@ -840,25 +849,42 @@ async function loadDynMood(tries = 0) {
   const left = d.days_left || 0;
   foot.textContent = `по ${d.n || 0} ${plural(d.n || 0, "записи", "записям", "записям")} · обновится через ${left} ${plural(left, "день", "дня", "дней")}`;
 }
+async function loadDynMood(tries = 0) {
+  if (!$("dynMoodCard")) return;
+  if (tries === 0) {                                  // мгновенно из кэша
+    try { const c = JSON.parse(localStorage.getItem(DYN_KEY()) || "null"); if (c) renderDynMood(c); } catch (_) {}
+  }
+  let d;
+  try { d = await api("/api/v2/dynamic-mood", { timeout: 15000 }); } catch (_) { d = null; }
+  if (d && d.score != null) { try { localStorage.setItem(DYN_KEY(), JSON.stringify(d)); } catch (_) {} }
+  renderDynMood(d, tries);
+}
 
+const STATS_KEY = () => "mood_stats_" + (window.__me?.id || "x");
+function renderAllStats(s) {
+  renderMood(s);
+  renderTests(s);
+  renderAnalytics(s);
+  if ($("weeklyCard")) $("weeklyCard").hidden = !(s && s.sessions >= 3);
+}
 async function loadStats() {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(STATS_KEY()) || "null"); } catch (_) {}
+  if (cached) { lastStats = cached; renderAllStats(cached); }   // мгновенно из кэша
   try {
     lastStats = await api("/api/stats");
-  } catch (_) { lastStats = null; }
-  renderMood(lastStats);
-  renderTests(lastStats);
-  renderAnalytics(lastStats);
-  // итоги недели открываются после 3 сеансов
-  if ($("weeklyCard")) $("weeklyCard").hidden = !(lastStats && lastStats.sessions >= 3);
+    try { localStorage.setItem(STATS_KEY(), JSON.stringify(lastStats)); } catch (_) {}
+  } catch (_) { if (!cached) lastStats = null; }
+  renderAllStats(lastStats);
 }
 
 /* ── пульс настроения ── */
 const PULSE = [
-  { e: "○", l: "тяжело" },
-  { e: "◔", l: "так себе" },
-  { e: "◑", l: "норм" },
-  { e: "◕", l: "хорошо" },
-  { e: "●", l: "отлично" },
+  { ic: "face-1", l: "тяжело" },
+  { ic: "face-2", l: "так себе" },
+  { ic: "face-3", l: "норм" },
+  { ic: "face-4", l: "хорошо" },
+  { ic: "face-5", l: "отлично" },
 ];
 const PULSE_SCORES = [12, 32, 55, 78, 95]; // зеркало server.py
 function renderPulse(s) {
@@ -872,7 +898,7 @@ function renderPulse(s) {
     const n = i + 1;
     const b = document.createElement("button");
     b.className = "pulse-btn" + (today === n ? " sel" : "");
-    b.innerHTML = `<span class="pulse-e">${p.e}</span><span class="pulse-l">${p.l}</span>`;
+    b.innerHTML = `<span class="pulse-e">${ico(p.ic)}</span><span class="pulse-l">${p.l}</span>`;
     b.onclick = () => doPulse(n);
     row.appendChild(b);
   });
@@ -888,6 +914,16 @@ async function doPulse(n) {
   } catch (e) { console.warn("pulse:", e); }
 }
 
+const MOOD_EXPLAIN = `**как считается оценка MOOD**
+
+это не настроение момента, а устойчивый индекс 0–100 из твоих ответов на тесты. честная математика, без ИИ-додумывания.
+
+берутся пункты валидированных шкал мировой психологии:
+**нейротизм** (эмоц. устойчивость, Big Five) · **тревога привязанности** · **самоценность** (зависимость от сравнений и достижений) · **эмоц. регуляция** (осознавание, выражение, умение успокоиться, захлёст эмоциями) · **восприятие стресса и контроля** · **переносимость трудностей** и восстановление.
+
+каждый ответ переводится в шкалу 0–1, усредняется, ×100. выше — больше внутренней опоры и устойчивости.
+
+равный вес у пунктов выбран намеренно: для таких составных оценок он так же надёжен, как сложные веса (Dawes, 1979). чем больше тестов пройдёшь — тем точнее. меньше 4 ответов — оценка не показывается.`;
 const MOOD_WORD = (m) => m >= 75 ? "ты в ресурсе" : m >= 55 ? "в целом устойчиво" : m >= 40 ? "качает, но держишься" : "тяжёлый период";
 function renderMood(s) {
   const locked = $("moodLocked"), ready = $("moodReady");

@@ -212,6 +212,13 @@ class Handler(BaseHTTPRequestHandler):
         h = self.headers.get("Authorization", "")
         return h[7:].strip() if h.startswith("Bearer ") else ""
 
+    def _owner(self):
+        """Возвращает пользователя только если он владелец (по OWNER_EMAIL). Иначе None."""
+        u = store.user_by_token(self._bearer())
+        if u and (u.get("email") or "").strip().lower() == OWNER_EMAIL:
+            return u
+        return None
+
     def _body(self):
         try:
             n = int(self.headers.get("Content-Length", 0))
@@ -478,6 +485,18 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self._json(401, {"error": "unauthorized"}); return
             self._json(200, {"messages": store.recent_messages(user["id"], 100)}); return
+        if p == "/api/admin/overview":
+            if not self._owner():
+                self._json(403, {"error": "forbidden"}); return
+            self._json(200, {"owner_email": OWNER_EMAIL, "users": store.admin_overview()}); return
+        if p == "/api/admin/user":
+            if not self._owner():
+                self._json(403, {"error": "forbidden"}); return
+            try:
+                tid = int(parse_qs(u.query).get("id", [""])[0])
+            except Exception:
+                self._json(400, {"error": "bad id"}); return
+            self._json(200, store.admin_user_detail(tid)); return
         if p == "/api/v2/opener":
             user = store.user_by_token(self._bearer())
             if not user:

@@ -30,7 +30,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="/style.css?v=33">
+<link rel="stylesheet" href="/style.css?v=34">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -112,6 +112,8 @@
 
     <!-- MOOD score -->
     <section class="card mood-card">
+      <button class="mood-info-btn" id="moodInfoBtn" title="как считается оценка" data-ico="info"></button>
+      <div class="mood-info" id="moodInfo" hidden></div>
       <div id="moodLocked" class="locked">
         <div class="locked-ico" data-ico="lock"></div>
         <div class="locked-t">оценка MOOD</div>
@@ -273,6 +275,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=33"></script>
+<script src="/app.js?v=34"></script>
 </body>
 </html>

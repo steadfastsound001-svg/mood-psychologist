@@ -461,3 +461,50 @@ def add_message(user_id: int, role: str, content: str) -> None:
 def recent_messages(user_id: int, limit: int = 30) -> list[dict]:
     rows = query("SELECT role, content FROM messages WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit))
     return list(reversed(rows))
+
+
+# ───────────── админ (обзор тестировщиков, только владелец) ─────────────
+
+def admin_overview() -> list[dict]:
+    """Сводка по всем аккаунтам: почта, активность, объёмы. Несколько GROUP BY вместо N запросов."""
+    users = query("SELECT id, email, name, created_at FROM users ORDER BY id")
+    def idx(rows):
+        return {r["user_id"]: r for r in rows}
+    msgs = idx(query("SELECT user_id, COUNT(*) c, MAX(ts) last FROM messages GROUP BY user_id"))
+    umsg = idx(query("SELECT user_id, COUNT(*) c FROM messages WHERE role='user' GROUP BY user_id"))
+    diary = idx(query("SELECT user_id, COUNT(*) c, MAX(ts) last FROM diary_entries GROUP BY user_id"))
+    docs = idx(query("SELECT user_id, COUNT(*) c, COALESCE(SUM(size),0) s FROM documents GROUP BY user_id"))
+    prof = idx(query("SELECT user_id, LENGTH(compiled) pc, onboarded FROM profiles"))
+    out = []
+    for u in users:
+        uid = u["id"]
+        m, d, p = msgs.get(uid, {}), diary.get(uid, {}), prof.get(uid, {})
+        cands = [x for x in (m.get("last"), d.get("last"), u.get("created_at")) if x]
+        out.append({
+            "id": uid, "email": u.get("email"), "name": u.get("name") or "",
+            "created_at": u.get("created_at"), "last_activity": max(cands) if cands else None,
+            "messages": m.get("c", 0), "user_msgs": umsg.get(uid, {}).get("c", 0),
+            "diary": d.get("c", 0), "docs": docs.get(uid, {}).get("c", 0),
+            "docs_bytes": docs.get(uid, {}).get("s", 0),
+            "portrait": bool(p.get("pc")), "onboarded": bool(p.get("onboarded")),
+        })
+    out.sort(key=lambda r: r.get("last_activity") or 0, reverse=True)
+    return out
+
+
+def admin_user_detail(uid: int) -> dict:
+    """Полная внутрянка одного аккаунта: профиль, переписка, дневник, досье."""
+    urow = query("SELECT id, email, name, created_at FROM users WHERE id=?", (uid,))
+    prof = get_profile(uid)
+    msgs = query("SELECT role, content, ts FROM messages WHERE user_id=? ORDER BY id", (uid,))
+    return {
+        "user": urow[0] if urow else None,
+        "profile": {
+            "compiled": prof.get("compiled") or "", "raw_info": prof.get("raw_info") or "",
+            "insights": prof.get("insights") or "", "onboarded": bool(prof.get("onboarded")),
+            "test_answers": prof.get("test_answers") or "", "extra_tests": prof.get("extra_tests") or "",
+        },
+        "messages": msgs,
+        "diary": list_diary_entries(uid, 500),
+        "documents": list_documents(uid),
+    }
