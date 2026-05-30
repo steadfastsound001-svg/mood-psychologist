@@ -71,7 +71,17 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 
 TG_TOKEN = os.environ["TELEGRAM_TOKEN"]
 USER_ID = int(os.environ["TELEGRAM_USER_ID"])
+# почта владельца = ключ синхронизации: TG-бот и веб/PWA пишут в один store-аккаунт
+OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "steadfast.sound001@gmail.com").strip().lower()
 client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+
+_OWNER_UID = None
+def owner_uid() -> int:
+    """store-uid владельца (по OWNER_EMAIL). Кэшируется. Через него идёт синк TG↔веб."""
+    global _OWNER_UID
+    if _OWNER_UID is None:
+        _OWNER_UID = store.get_or_create_oauth_user(OWNER_EMAIL, "telegram")["id"]
+    return _OWNER_UID
 
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -1321,6 +1331,15 @@ async def _process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
         edited = await edited_task if edited_task else text
 
         write_jsonl(text, reply or "", kind=kind)
+        # синхронизация с веб/PWA: пишем диалог в общий store (Turso) под аккаунт владельца,
+        # чтобы то, что написано в TG, появлялось в приложении. не валит ответ при сбое БД.
+        try:
+            uid = owner_uid()
+            store.add_message(uid, "user", text)
+            if reply:
+                store.add_message(uid, "assistant", reply)
+        except Exception as e:
+            print(f"[sync] не записал в store: {e}", flush=True)
         if is_report and reply:
             write_apple_notes(edited, reply)
         if crisis:
