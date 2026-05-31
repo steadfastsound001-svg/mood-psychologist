@@ -137,6 +137,7 @@ async function boot() {
   try {
     const me = await api("/api/me");
     window.__me = me.user;
+    if (lockEnabled()) { await requireUnlock(); }   // Face ID / код
     if (!me.onboarded) { startOnboarding(); show("onboardScreen"); }
     else { initApp(); show("app"); }
   } catch (e) {
@@ -144,6 +145,114 @@ async function boot() {
     initAuth();
     show("authScreen");
   }
+}
+
+/* ───────── APP-LOCK: Face ID / код (локально, на устройстве) ───────── */
+const LOCK_PIN = "mood_lock_pin", LOCK_FACE = "mood_lock_face";
+const lockEnabled = () => { try { return !!localStorage.getItem(LOCK_PIN); } catch (_) { return false; } };
+async function sha(s) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+let lockResolve = null, lockBuf = "", lockMode = "unlock", lockFirst = "";
+function lockDots() {
+  const d = $("lockDots"); if (!d) return;
+  d.innerHTML = "";
+  for (let i = 0; i < 4; i++) { const s = document.createElement("span"); s.className = "lock-dot" + (i < lockBuf.length ? " on" : ""); d.appendChild(s); }
+}
+function lockKeys() {
+  const k = $("lockKeys"); if (!k || k.childElementCount) return;
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].forEach((ch) => {
+    const b = document.createElement("button");
+    b.className = "lock-key" + (ch ? "" : " empty"); b.textContent = ch;
+    if (ch) b.onclick = () => lockPress(ch);
+    k.appendChild(b);
+  });
+}
+function lockErrMsg(t) { const e = $("lockErr"); e.textContent = t; e.hidden = false; setTimeout(() => { e.hidden = true; }, 1600); }
+function lockClose(ok) { $("lockScreen").hidden = true; const r = lockResolve; lockResolve = null; if (r) r(ok); }
+async function lockPress(ch) {
+  haptic();
+  if (ch === "⌫") { lockBuf = lockBuf.slice(0, -1); lockDots(); return; }
+  if (lockBuf.length >= 4) return;
+  lockBuf += ch; lockDots();
+  if (lockBuf.length === 4) { const pin = lockBuf; setTimeout(() => lockComplete(pin), 110); }
+}
+async function lockComplete(pin) {
+  if (lockMode === "unlock") {
+    if ((await sha(pin)) === localStorage.getItem(LOCK_PIN)) lockClose(true);
+    else { lockErrMsg("неверный код"); lockBuf = ""; lockDots(); }
+  } else if (lockMode === "set1") {
+    lockFirst = pin; lockBuf = ""; lockMode = "set2"; lockDots(); $("lockTitle").textContent = "повтори код";
+  } else if (lockMode === "set2") {
+    if (pin === lockFirst) { localStorage.setItem(LOCK_PIN, await sha(pin)); lockClose(true); }
+    else { lockErrMsg("коды разные"); lockMode = "set1"; lockFirst = ""; lockBuf = ""; lockDots(); $("lockTitle").textContent = "придумай код"; }
+  }
+}
+function showLock(mode) {
+  lockKeys(); lockBuf = ""; lockFirst = ""; lockMode = mode === "unlock" ? "unlock" : "set1";
+  lockDots(); $("lockErr").hidden = true;
+  $("lockTitle").textContent = mode === "unlock" ? "введи код" : "придумай код";
+  const faceBtn = $("lockFace"), canFace = mode === "unlock" && !!localStorage.getItem(LOCK_FACE);
+  faceBtn.hidden = !canFace; faceBtn.onclick = () => faceUnlock(false);
+  $("lockCancel").hidden = mode === "unlock";
+  $("lockCancel").onclick = () => lockClose(false);
+  $("lockScreen").hidden = false;
+  return new Promise((res) => { lockResolve = res; });
+}
+async function faceUnlock(silent) {
+  try {
+    const id = localStorage.getItem(LOCK_FACE); if (!id) return false;
+    await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type: "public-key", id: unb64(id) }],
+      userVerification: "required", timeout: 60000 } });
+    lockClose(true); return true;
+  } catch (_) { if (!silent) lockErrMsg("Face ID не прошёл"); return false; }
+}
+async function registerFace() {
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: "MOOD", id: location.hostname },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: window.__me?.email || "mood", displayName: "MOOD" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+      timeout: 60000, attestation: "none" } });
+    localStorage.setItem(LOCK_FACE, b64(cred.rawId)); return true;
+  } catch (_) { return false; }
+}
+async function requireUnlock() {
+  if (localStorage.getItem(LOCK_FACE)) { if (await faceUnlock(true)) return true; }
+  return await showLock("unlock");
+}
+function lockStateText() {
+  const el = $("lockState"); if (!el) return;
+  const pin = !!localStorage.getItem(LOCK_PIN), face = !!localStorage.getItem(LOCK_FACE);
+  el.textContent = !pin ? "выключена" : face ? "код + Face ID" : "код";
+}
+function setupLockUI() {
+  lockStateText();
+  const btn = $("lockBtn"); if (!btn) return;
+  btn.onclick = async () => {
+    haptic("medium");
+    if (lockEnabled()) {
+      if (!confirm("Защита включена. Выключить?")) return;
+      const ok = await showLock("unlock");
+      if (ok) { localStorage.removeItem(LOCK_PIN); localStorage.removeItem(LOCK_FACE); lockStateText(); }
+      return;
+    }
+    const ok = await showLock("set1");
+    if (!ok) return;
+    lockStateText();
+    if (window.PublicKeyCredential && confirm("Код установлен. Добавить вход по Face ID?")) {
+      if (await registerFace()) lockStateText();
+      else alert("Face ID недоступен на этом устройстве");
+    }
+  };
 }
 
 /* ───────── AUTH (только Google) ───────── */
@@ -275,6 +384,7 @@ function initApp() {
     $("pfSend").onclick = sendPortraitFeedback;
     $("weeklyBtn").onclick = genWeekly;
     $("logoutBtn").onclick = () => { clearToken(); location.reload(); };
+    setupLockUI();
     $("fileBtn").onclick = () => $("fileInput").click();
     $("fileInput").onchange = (e) => uploadFiles(e.target.files);
     $("diarySave").onclick = saveDiaryFromTab;

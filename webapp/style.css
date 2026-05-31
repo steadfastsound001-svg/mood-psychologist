@@ -673,6 +673,36 @@ canvas { display: block; max-width: 100%; }
 }
 .swipe-layer.animate { transition: transform .26s cubic-bezier(.22,.61,.36,1); }
 
+/* ───────── app-lock (Face ID / код) ───────── */
+.lock-screen {
+  position: fixed; inset: 0; z-index: 900;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+}
+.lock-box { width: 100%; max-width: 300px; text-align: center; }
+.lock-logo { font-size: 34px; color: var(--accent, var(--text)); margin-bottom: 10px; }
+.lock-title { font-size: var(--t-body); color: var(--text); margin-bottom: 18px; }
+.lock-dots { display: flex; justify-content: center; gap: 16px; margin-bottom: 14px; min-height: 16px; }
+.lock-dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--hint); transition: background .15s, border-color .15s; }
+.lock-dot.on { background: var(--accent, var(--text)); border-color: var(--accent, var(--text)); }
+.lock-err { color: #ff6b6b; font-size: var(--t-footnote); min-height: 16px; margin-bottom: 6px; }
+.lock-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 8px auto 0; max-width: 260px; }
+.lock-key {
+  height: 64px; border-radius: 50%; border: none; cursor: pointer;
+  background: var(--surface-strong); color: var(--text);
+  font-size: 26px; font-family: inherit; font-weight: 500;
+  transition: transform .1s, background .15s;
+}
+.lock-key:active { transform: scale(.93); background: var(--accent, var(--text)); color: var(--bg); }
+.lock-key.empty { background: transparent; pointer-events: none; }
+.lock-face {
+  margin-top: 22px; width: 100%; padding: 13px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--card); color: var(--text);
+  font-size: var(--t-body); font-family: inherit; cursor: pointer;
+}
+.lock-cancel { display: inline-block; margin-top: 14px; }
+
 .msg {
   max-width: 82%;
   padding: 10px 15px;
