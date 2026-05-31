@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py store.py onboarding.py llm.py agent_core.py stt.py ./
+COPY server.py store.py onboarding.py llm.py agent_core.py agent_config.py stt.py ./
 COPY SOUL.md ./
 COPY webapp ./webapp
 
