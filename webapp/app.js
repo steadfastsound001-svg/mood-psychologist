@@ -325,25 +325,65 @@ function switchView(view, animate) {
   if (view === "diary") loadDiary();
 }
 
-/* свайп между вкладками: горизонтальный жест → соседняя вкладка со слайдом */
+/* палец-фолоу свайп: страница едет за пальцем, соседняя въезжает сбоку.
+   оверлей-слой ставится ТОЛЬКО на время жеста — вне свайпа вёрстка не меняется. */
 function setupSwipe() {
   const app = $("app");
-  let x0 = null, y0 = null, t0 = 0;
+  let sx = 0, sy = 0, locked = null, vw = 0, from = null, to = null, sign = 0, dragging = false;
+
+  const reHide = () => {
+    $("chatView").hidden = curView !== "chat";
+    $("diaryView").hidden = curView !== "diary";
+    $("profileView").hidden = curView !== "profile";
+  };
+
   app.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) { x0 = null; return; }
-    // не перехватываем жест на интерактиве и горизонтально-скроллимых зонах
-    if (e.target.closest("input, textarea, .mood-chart, .trend-wrap, .diary-menu, .test-modal")) { x0 = null; return; }
-    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+    if (e.touches.length !== 1) { locked = "v"; return; }
+    if (e.target.closest("input, textarea, .mood-chart, .bar-chart, .trend-wrap, .diary-menu, .test-modal, .test-sheet, .pf-box")) { locked = "v"; return; }
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; vw = window.innerWidth;
+    locked = null; dragging = false;
   }, { passive: true });
-  app.addEventListener("touchend", (e) => {
-    if (x0 == null) return;
-    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0, dt = Date.now() - t0;
-    x0 = null;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.7 && dt < 600) {
-      const i = VIEWS.indexOf(curView);
-      if (dx < 0 && i < VIEWS.length - 1) { haptic(); switchView(VIEWS[i + 1], true); }
-      else if (dx > 0 && i > 0) { haptic(); switchView(VIEWS[i - 1], true); }
+
+  app.addEventListener("touchmove", (e) => {
+    if (locked === "v") return;
+    const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
+    if (!locked) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      if (Math.abs(dx) <= Math.abs(dy)) { locked = "v"; return; }   // вертикаль → нативный скролл
+      const i = VIEWS.indexOf(curView), ti = dx < 0 ? i + 1 : i - 1;
+      if (ti < 0 || ti >= VIEWS.length) { locked = "v"; return; }    // нет соседа
+      locked = "h"; dragging = true; sign = dx < 0 ? 1 : -1;
+      from = viewEl(curView); to = viewEl(VIEWS[ti]);
+      to.hidden = false;
+      from.classList.add("swipe-layer"); to.classList.add("swipe-layer");
+      to.style.transform = `translateX(${sign * vw}px)`;
     }
+    if (locked === "h") {
+      e.preventDefault();
+      let d = Math.max(-vw, Math.min(vw, e.touches[0].clientX - sx));
+      if ((sign > 0 && d > 0) || (sign < 0 && d < 0)) d = 0;        // не тянуть в пустую сторону
+      from.style.transform = `translateX(${d}px)`;
+      to.style.transform = `translateX(${sign * vw + d}px)`;
+    }
+  }, { passive: false });
+
+  app.addEventListener("touchend", (e) => {
+    if (locked !== "h" || !dragging) { locked = null; return; }
+    const d = e.changedTouches[0].clientX - sx;
+    const commit = Math.abs(d) > vw * 0.28;
+    const fEl = from, tEl = to, s = sign;
+    const target = commit ? VIEWS[VIEWS.indexOf(curView) + (s > 0 ? 1 : -1)] : null;
+    fEl.classList.add("animate"); tEl.classList.add("animate");
+    fEl.style.transform = `translateX(${commit ? -s * vw : 0}px)`;
+    tEl.style.transform = `translateX(${commit ? 0 : s * vw}px)`;
+    if (commit) haptic();
+    setTimeout(() => {
+      fEl.classList.remove("swipe-layer", "animate"); tEl.classList.remove("swipe-layer", "animate");
+      fEl.style.transform = ""; tEl.style.transform = "";
+      if (commit && target) switchView(target, false);
+      reHide();
+    }, 270);
+    locked = null; dragging = false; from = to = null;
   }, { passive: true });
 }
 
@@ -1014,14 +1054,36 @@ function renderMood(s) {
   fill.style.stroke = m >= 65 ? "#30d158" : m >= 45 ? "#ffd60a" : "#ff9f0a";
   animateNum($("moodNum"), m);
   $("moodCap").textContent = MOOD_WORD(m);
+  const hist = s.mood_history || [];
   const chart = $("moodChart");
   if (chart) {
-    const hist = s.mood_history || [];
     const spark = sparkline(hist);
     chart.innerHTML = spark
       ? `<div class="mood-chart-cap">динамика · ${hist.length} ${plural(hist.length, "отметка", "отметки", "отметок")}</div>${spark}`
-      : "";
+      : chartLock(`динамика появится после ${Math.max(0, 2 - hist.length)} ${plural(Math.max(0, 2 - hist.length), "отметки", "отметок", "отметок")}`);
   }
+  const bars = $("moodBars");
+  if (bars) {
+    bars.innerHTML = hist.length >= 3
+      ? `<div class="mood-chart-cap">последние отметки</div>${barChart(hist)}`
+      : chartLock(`график по дням — нужно ещё ${Math.max(0, 3 - hist.length)} ${plural(Math.max(0, 3 - hist.length), "отметка", "отметки", "отметок")}`);
+  }
+}
+
+/* заглушка-замок вместо пустого графика */
+function chartLock(text) {
+  return `<div class="chart-lock">${ico("lock")}<span>${text}</span></div>`;
+}
+
+/* barChart: столбики по последним отметкам MOOD, цвет по уровню */
+function barChart(hist) {
+  const last = hist.slice(-14);
+  const bars = last.map((h) => {
+    const v = Math.max(0, Math.min(100, h.score || 0));
+    const col = v >= 65 ? "#30d158" : v >= 45 ? "#ffd60a" : "#ff9f0a";
+    return `<div class="bar" style="height:${Math.max(8, v)}%;background:${col}"></div>`;
+  }).join("");
+  return `<div class="bar-chart">${bars}</div>`;
 }
 
 /* sparkline: SVG-полилиния по истории MOOD */

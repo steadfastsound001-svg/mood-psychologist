@@ -1783,6 +1783,22 @@ def main() -> None:
     app.job_queue.run_daily(evening_ping, time=time(hour=22, minute=0, tzinfo=MOSCOW_TZ))
     app.job_queue.run_daily(morning_ping, time=time(hour=9, minute=0, tzinfo=MOSCOW_TZ))
 
+    async def _diary_to_notes(context):
+        """Записи дневника владельца из веб-приложения → Apple Notes. launchd на ~/Desktop
+        блокируется TCC, поэтому гоним из процесса бота (права терминала есть)."""
+        try:
+            loop = asyncio.get_event_loop()
+            r = await loop.run_in_executor(None, lambda: subprocess.run(
+                ["python3", "tools/applenotes_sync.py", "push"], cwd=str(ROOT),
+                capture_output=True, text=True, timeout=120))
+            out = (r.stdout or r.stderr).strip().splitlines()[-1:] if (r.stdout or r.stderr) else []
+            if out:
+                print(f"[diary-notes] {out[0]}", flush=True)
+        except Exception as e:
+            print(f"[diary-notes] {e}", flush=True)
+
+    app.job_queue.run_repeating(_diary_to_notes, interval=1800, first=20)
+
     async def _post_init(application):
         await _register_menu_button(application)
         await _register_bot_commands(application)

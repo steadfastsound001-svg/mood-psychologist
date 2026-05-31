@@ -659,6 +659,20 @@ canvas { display: block; max-width: 100%; }
   .view-slide-right, .view-slide-left { animation: none; }
 }
 
+/* палец-фолоу свайп: слой вью на время жеста (вне свайпа классы нет) */
+.swipe-layer {
+  position: fixed !important;
+  top: 0; left: 0; right: 0;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  overflow: hidden !important;
+  z-index: 55;
+  background: var(--bg);
+  margin: 0 !important;
+  max-width: none !important;
+  will-change: transform;
+}
+.swipe-layer.animate { transition: transform .26s cubic-bezier(.22,.61,.36,1); }
+
 .msg {
   max-width: 82%;
   padding: 10px 15px;
@@ -1500,6 +1514,21 @@ a:focus:not(:focus-visible),
 /* график в карте MOOD */
 .mood-chart { margin-top: 18px; }
 .mood-chart-cap { font-size: var(--t-footnote); color: var(--hint); margin-bottom: 6px; text-align: left; }
+
+/* замок вместо пустого графика */
+.chart-lock {
+  display: flex; align-items: center; gap: 8px;
+  padding: 16px; border: 1px dashed var(--border, rgba(127,127,127,.28));
+  border-radius: 14px; color: var(--hint); font-size: var(--t-footnote);
+}
+.chart-lock svg { width: 16px; height: 16px; opacity: .7; flex: none; }
+
+/* столбчатый график отметок */
+.bar-chart {
+  display: flex; align-items: flex-end; gap: 4px;
+  height: 64px; padding: 4px 0;
+}
+.bar-chart .bar { flex: 1; min-width: 4px; border-radius: 3px 3px 0 0; opacity: .85; }
 
 /* баннер «добавить на домашний экран» */
 .install-banner {
