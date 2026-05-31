@@ -3,8 +3,20 @@ const tg = window.Telegram?.WebApp;
 try { tg?.ready?.(); tg?.expand?.(); } catch (_) {}
 
 const $ = (id) => document.getElementById(id);
-const haptic = (k = "light") => { try { tg?.HapticFeedback?.impactOccurred(k); } catch (_) {} };
-const hapticOk = () => { try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (_) {} };
+// вне Telegram (установленная PWA / браузер) тактилки нет — пробуем navigator.vibrate (Android).
+const _canVibrate = () => { try { return !isInTelegram() && typeof navigator !== "undefined" && navigator.vibrate; } catch (_) { return false; } };
+const haptic = (k = "light") => {
+  try { tg?.HapticFeedback?.impactOccurred(k); } catch (_) {}
+  try { if (_canVibrate()) navigator.vibrate(k === "heavy" ? 16 : k === "medium" ? 11 : 6); } catch (_) {}
+};
+const hapticSel = () => {
+  try { tg?.HapticFeedback?.selectionChanged(); } catch (_) {}
+  try { if (_canVibrate()) navigator.vibrate(4); } catch (_) {}
+};
+const hapticOk = () => {
+  try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (_) {}
+  try { if (_canVibrate()) navigator.vibrate([6, 30, 12]); } catch (_) {}
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ───────── единые монохромные иконки (lucide) ───────── */
@@ -430,8 +442,8 @@ function initApp() {
     setupThemes();
     setupInstallPrompt();
     loadExtraTests();
+    setupSwipe();
   }
-  setupSwipe();
   switchView("chat");
 }
 
@@ -462,7 +474,7 @@ function switchView(view, animate) {
    оверлей-слой ставится ТОЛЬКО на время жеста — вне свайпа вёрстка не меняется. */
 function setupSwipe() {
   const app = $("app");
-  let sx = 0, sy = 0, locked = null, vw = 0, from = null, to = null, sign = 0, dragging = false, fromScroll = 0;
+  let sx = 0, sy = 0, locked = null, vw = 0, from = null, to = null, sign = 0, dragging = false, fromScroll = 0, crossed = false;
   const scrollTop = () => window.scrollY || document.documentElement.scrollTop || 0;
 
   const reHide = () => {
@@ -486,7 +498,8 @@ function setupSwipe() {
       if (Math.abs(dx) < Math.abs(dy) * 1.3) { locked = "v"; return; }   // вертикаль → нативный скролл
       const i = VIEWS.indexOf(curView), ti = dx < 0 ? i + 1 : i - 1;
       if (ti < 0 || ti >= VIEWS.length) { locked = "v"; return; }        // нет соседа
-      locked = "h"; dragging = true; sign = dx < 0 ? 1 : -1;
+      locked = "h"; dragging = true; sign = dx < 0 ? 1 : -1; crossed = false;
+      haptic("light");                                                   // тактильный старт свайпа
       fromScroll = scrollTop();                                          // запоминаем прокрутку, чтобы не прыгало
       from = viewEl(curView); to = viewEl(VIEWS[ti]);
       to.hidden = false;
@@ -498,6 +511,8 @@ function setupSwipe() {
       e.preventDefault();
       let d = Math.max(-vw, Math.min(vw, e.touches[0].clientX - sx));
       if ((sign > 0 && d > 0) || (sign < 0 && d < 0)) d = 0;            // не тянуть в пустую сторону
+      const past = Math.abs(d) > vw * 0.25;                            // порог переключения
+      if (past !== crossed) { crossed = past; hapticSel(); }           // тактильная засечка на пороге
       from.style.transform = `translate(${d}px, ${-fromScroll}px)`;
       to.style.transform = `translateX(${sign * vw + d}px)`;
     }
@@ -545,9 +560,14 @@ const CHAT_KEY = () => "mood_chat_" + (window.__me?.id || "x");
 function loadChat() { try { return JSON.parse(localStorage.getItem(CHAT_KEY()) || "[]"); } catch (_) { return []; } }
 function saveChat(a) { try { localStorage.setItem(CHAT_KEY(), JSON.stringify(a.slice(-100))); } catch (_) {} }
 
-function chatRender() {
+let lastChatSig = null;
+function chatRender(force) {
   const box = $("chatMessages");
   const h = loadChat();
+  // не перерисовываем DOM, если контент тот же — иначе мигание/прыжок при пересвайпе назад
+  const sig = JSON.stringify(h.map((m) => [m.role, m.text]));
+  if (!force && sig === lastChatSig && box.childElementCount) return;
+  lastChatSig = sig;
   box.innerHTML = "";
   if (!h.length) {
     const e = document.createElement("div");
@@ -682,9 +702,15 @@ function moodSymbolForTs(ts) {
 }
 
 let diaryEditId = null;
-function renderDiary(entries) {
+let lastDiarySig = null;
+function renderDiary(entries, force) {
   const box = $("diaryList");
   if (!box) return;
+  entries = entries || [];
+  // не перерисовываем, если ничего не изменилось — иначе значки настроения «загружаются по новой»
+  const sig = JSON.stringify(entries.map((e) => [e.id, e.text, e.feedback || "", moodSymbolForTs(e.ts)])) + "|" + (diaryEditId || "");
+  if (!force && sig === lastDiarySig && box.childElementCount) return;
+  lastDiarySig = sig;
   box.innerHTML = "";
   if (!entries.length) {
     box.innerHTML = '<div class="diary-empty">пока пусто — напиши первую запись выше</div>';
@@ -1074,7 +1100,7 @@ function renderDynMood(d, tries = 0) {
   if (desc) desc.textContent = d.desc || "";
   animateNum(num, d.score);
   bar.style.width = d.score + "%";
-  bar.style.background = d.score >= 65 ? "#30d158" : d.score >= 45 ? "#ffd60a" : "#ff9f0a";
+  bar.style.background = moodColor(d.score);
   note.textContent = d.note || "";
   const left = d.days_left || 0;
   foot.textContent = `по ${d.n || 0} ${plural(d.n || 0, "записи", "записям", "записям")} · обновится через ${left} ${plural(left, "день", "дня", "дней")}`;
@@ -1167,6 +1193,13 @@ const MOOD_EXPLAIN = `**как считается оценка MOOD**
 
 обе части усредняются в одну оценку. чем больше тестов, записей и общения — тем точнее, и тем сильнее оценка адаптируется под тебя. выше — больше внутренней опоры. мало данных — оценка не показывается.`;
 const MOOD_WORD = (m) => m >= 75 ? "ты в ресурсе" : m >= 55 ? "в целом устойчиво" : m >= 40 ? "качает, но держишься" : "тяжёлый период";
+/* цвет шкалы строго из палитры: тил = хорошо, терракота = внимание (никакой радуги) */
+function moodColor(v) {
+  const cs = getComputedStyle(document.documentElement);
+  const good = (cs.getPropertyValue("--accent-2") || "").trim() || "#4f8a82";
+  const warn = (cs.getPropertyValue("--accent") || "").trim() || "#a67c52";
+  return v >= 55 ? good : warn;
+}
 function renderMood(s) {
   const locked = $("moodLocked"), ready = $("moodReady");
   if (!s || s.mood == null) {
@@ -1188,7 +1221,7 @@ function renderMood(s) {
   const fill = $("mrFill");
   fill.style.strokeDasharray = C;
   fill.style.strokeDashoffset = C * (1 - m / 100);
-  fill.style.stroke = m >= 65 ? "#30d158" : m >= 45 ? "#ffd60a" : "#ff9f0a";
+  fill.style.stroke = moodColor(m);
   animateNum($("moodNum"), m);
   $("moodCap").textContent = MOOD_WORD(m);
   const hist = s.mood_history || [];
@@ -1217,7 +1250,7 @@ function moodComposition(s) {
       return `<div class="comp-row"><div class="comp-l"><b>${label}</b><span class="comp-sub">${sub}</span></div>` +
              `<div class="comp-track"></div><div class="comp-v">—</div></div>`;
     }
-    const v = Math.round(val), col = v >= 65 ? "#30d158" : v >= 45 ? "#ffd60a" : "#ff9f0a";
+    const v = Math.round(val), col = moodColor(v);
     return `<div class="comp-row"><div class="comp-l"><b>${label}</b><span class="comp-sub">${sub}</span></div>` +
            `<div class="comp-track"><div class="comp-fill" style="width:${v}%;background:${col}"></div></div>` +
            `<div class="comp-v">${v}</div></div>`;
@@ -1251,7 +1284,14 @@ function sparkline(hist) {
   </svg>`;
 }
 
+function updateSoulSub(s) {
+  const sub = $("soulSub"); if (!sub) return;
+  if (!s) { sub.textContent = "из чего психолог собирает тебя"; return; }
+  const tot = s.tests_total || 0, done = s.tests_passed || 0;
+  sub.textContent = (tot && done < tot) ? `тесты ${done}/${tot} · досье · о себе` : "тесты пройдены · досье · о себе";
+}
 function renderTests(s) {
+  updateSoulSub(s);
   const box = $("testsList");
   box.innerHTML = "";
   // первичный тест: если пропущен — даём пройти отсюда в любой момент
@@ -1348,16 +1388,16 @@ async function exportPortrait() {
   cv.width = W * dpr; cv.height = H * dpr;
   const ctx = cv.getContext("2d");
   ctx.scale(dpr, dpr);
-  // фон-градиент
+  // фон-градиент (тёплое тёмное дерево — единая палитра)
   const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, "#0a0a14"); g.addColorStop(1, "#15102e");
+  g.addColorStop(0, "#2d2621"); g.addColorStop(1, "#1c1611");
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // акцентное свечение
+  // акцентное свечение (терракота)
   const glow = ctx.createRadialGradient(W * 0.8, 160, 0, W * 0.8, 160, 420);
-  glow.addColorStop(0, "rgba(124,95,255,0.35)"); glow.addColorStop(1, "rgba(124,95,255,0)");
+  glow.addColorStop(0, "rgba(192,160,128,0.32)"); glow.addColorStop(1, "rgba(192,160,128,0)");
   ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
   // лого / заголовок
-  ctx.fillStyle = "#7c5fff"; ctx.font = "700 56px 'Space Grotesk', sans-serif";
+  ctx.fillStyle = "#c0a080"; ctx.font = "700 56px 'Space Grotesk', sans-serif";
   ctx.fillText("◆ MOOD", pad, pad + 50);
   ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "400 28px Inter, sans-serif";
   ctx.fillText("твой психологический портрет", pad, pad + 95);

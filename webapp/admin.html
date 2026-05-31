@@ -73,6 +73,14 @@
   .cfg-btn.ghost{ background:transparent; color:var(--hint); border:1px solid var(--line); font-weight:400; }
   .cfg-flash{ color:var(--good); font-size:12px; }
   .cfg-flash.bad{ color:var(--bad); }
+  .tc-log{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px; min-height:140px; max-height:400px; overflow:auto; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; }
+  .tc-log:empty:before{ content:"пусто — напиши и проверь характер"; color:var(--hint); font-size:13px; }
+  .tc-log .msg{ max-width:82%; margin:0; }
+  .tc-log .msg.user{ align-self:flex-end; background:var(--accent); color:#1a1410; }
+  .tc-log .msg.user .r{ color:#5c4a36; }
+  .tc-row{ display:flex; gap:8px; align-items:flex-end; }
+  .tc-inp{ flex:1; min-height:46px; max-height:120px; }
+  .tc-clear{ background:transparent; color:var(--hint); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; font:inherit; font-size:12px; }
 </style>
 </head>
 <body>
@@ -283,6 +291,40 @@ function cfgEditor(it){
   box.append(act);
   return box;
 }
+/* живой чат с психологом прямо в техпанели — на текущих промптах, без записи в историю */
+function testChat(){
+  const card=el("div",{class:"card2"});
+  card.append(el("h2",{text:"чат с психологом — проверь настройки"}));
+  card.append(el("div",{class:"lead",text:"отвечает на твоём реальном характере и текущих промптах выше. сообщения НЕ сохраняются — чистая песочница. поменял промпт → отправь и сразу слышишь разницу."}));
+  const log=el("div",{class:"tc-log"});
+  const inp=el("textarea",{class:"cfg-area tc-inp",rows:"2",placeholder:"напиши сообщение…"});
+  const send=el("button",{class:"cfg-btn",text:"отправить"});
+  const clr=el("button",{class:"tc-clear",text:"очистить"});
+  const hist=[];
+  let busy=false;
+  clr.onclick=()=>{ hist.length=0; clear(log); };
+  async function go(){
+    const q=inp.value.trim(); if(!q||busy) return;
+    busy=true; send.disabled=true; inp.value="";
+    log.append(el("div",{class:"msg user"}, el("div",{class:"r",text:"ты"}), q));
+    const ans=el("div",{class:"msg assistant"}, el("div",{class:"r",text:"психолог"}));
+    const txt=document.createTextNode("…"); ans.append(txt); log.append(ans); log.scrollTop=log.scrollHeight;
+    try{
+      const res=await fetch("/api/admin/test-chat",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({q,history:hist})});
+      if(!res.ok||!res.body){ txt.textContent="ошибка "+res.status; busy=false; send.disabled=false; return; }
+      const rd=res.body.getReader(), dec=new TextDecoder(); let acc="";
+      txt.textContent="";
+      while(true){ const {value,done}=await rd.read(); if(done) break; acc+=dec.decode(value,{stream:true}); txt.textContent=acc; log.scrollTop=log.scrollHeight; }
+      hist.push({role:"user",content:q}); hist.push({role:"assistant",content:acc});
+      if(hist.length>20) hist.splice(0,hist.length-20);
+    }catch(e){ txt.textContent="сорвалось: "+e.message; }
+    busy=false; send.disabled=false; inp.focus();
+  }
+  send.onclick=go;
+  inp.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); go(); }});
+  card.append(log, el("div",{class:"tc-row"}, inp, send), el("div",{style:"margin-top:8px"}, clr));
+  return card;
+}
 async function renderTech(){
   clear($("stats"));
   const c=$("content"); clear(c); c.append(el("div",{class:"muted",text:"загружаю…"}));
@@ -298,6 +340,7 @@ async function renderTech(){
     list.forEach(it=>wrap.append(cfgEditor(it)));
     c.append(wrap);
   });
+  c.append(testChat());
 }
 
 function buildTabs(){

@@ -375,6 +375,43 @@ class Handler(BaseHTTPRequestHandler):
             store.add_message(uid, "assistant", reply)
             _maybe_learn(uid)  # фоновое само-обучение по свежему разговору
 
+    def _admin_test_chat(self, uid, body):
+        """Песочница владельца: тот же системный промпт и модель, что в проде,
+        но БЕЗ записи в историю и без само-обучения. Для проверки правок промптов.
+        История диалога приходит с клиента (не персистится)."""
+        text = (body.get("q") or "").strip()
+        if not text:
+            self._json(400, {"error": "empty"}); return
+        prof = store.get_profile(uid)
+        insights = store.get_insights(uid)
+        messages = []
+        for m in (body.get("history") or [])[-20:]:
+            role = "user" if m.get("role") == "user" else "assistant"
+            content = (m.get("content") or "").strip()
+            if content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": text})
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            for delta in stream_completion_sync(
+                system=user_system(prof.get("compiled", ""), insights),
+                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 150), task="dialog",
+            ):
+                try:
+                    self.wfile.write(delta.encode("utf-8")); self.wfile.flush()
+                except Exception:
+                    break
+        except Exception as e:
+            try:
+                self.wfile.write(f"\n[сломалось: {e}]".encode("utf-8"))
+            except Exception:
+                pass
+
     def _transcribe(self):
         """Распознаёт голос (сырые байты аудио) через Groq Whisper → {"text": ...}."""
         if not store.user_by_token(self._bearer()):
@@ -628,6 +665,12 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     agent_config.set_item(key, body.get("value") or "")
                 self._json(200, {"ok": True, "items": agent_config.all_items()}); return
+
+            if u.path == "/api/admin/test-chat":
+                owner = self._owner()
+                if not owner:
+                    self._json(403, {"error": "forbidden"}); return
+                self._admin_test_chat(owner["id"], body); return
 
             user = store.user_by_token(self._bearer())
             if not user:

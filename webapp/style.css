@@ -18,6 +18,10 @@
   --ring: #a67c52;
   --destructive: #b54a35;
   --accent-rgb: 166, 124, 82;
+  --destructive-rgb: 181, 74, 53;
+  /* комплиментарный второй акцент (тил) — пара к тёплой терракоте */
+  --accent-2: #4f8a82;
+  --accent-2-rgb: 79, 138, 130;
 
   /* мост к историческим именам переменных (всё ниже наследует тему) */
   --bg: var(--background);
@@ -35,11 +39,12 @@
   --glass-highlight: inset 0 1px 0 rgba(255,255,255,0.7);
   --bar-bg: rgba(255, 252, 245, 0.82);
 
-  --ring-good: #7a9a5e;
-  --ring-warn: #d8a93f;
-  --ring-mid: #c98a4a;
-  --ring-bad: #c2683f;
-  --ring-info: #8d6e4c;
+  /* статусы сведены к палитре: тил = хорошо, терракота = внимание, клэй = опасно */
+  --ring-good: var(--accent-2);
+  --ring-warn: var(--accent);
+  --ring-mid: var(--accent);
+  --ring-bad: var(--destructive);
+  --ring-info: var(--accent);
 
   --grad-spectrum: linear-gradient(135deg, #b3906f 0%, #a67c52 100%);
   --grad-spectrum-soft: linear-gradient(135deg, rgba(166,124,82,0.16) 0%, rgba(141,110,76,0.16) 100%);
@@ -90,6 +95,9 @@ html.dark {
   --ring: #c0a080;
   --destructive: #b54a35;
   --accent-rgb: 192, 160, 128;
+  --destructive-rgb: 181, 74, 53;
+  --accent-2: #7fb0a6;
+  --accent-2-rgb: 127, 176, 166;
 
   --surface: rgba(255, 255, 255, 0.05);
   --surface-strong: rgba(255, 255, 255, 0.09);
@@ -99,7 +107,7 @@ html.dark {
   --glass-highlight: inset 0 1px 0 rgba(255,255,255,0.10);
   --bar-bg: rgba(45, 38, 33, 0.82);
 
-  --ring-info: #c0a080;
+  --ring-info: var(--accent);
 
   --grad-spectrum: linear-gradient(135deg, #c0a080 0%, #a67c52 100%);
   --grad-spectrum-soft: linear-gradient(135deg, rgba(192,160,128,0.18) 0%, rgba(166,124,82,0.18) 100%);
@@ -696,7 +704,7 @@ canvas { display: block; max-width: 100%; }
 .lock-dots { display: flex; justify-content: center; gap: 16px; margin-bottom: 14px; min-height: 16px; }
 .lock-dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--hint); transition: background .15s, border-color .15s; }
 .lock-dot.on { background: var(--accent, var(--text)); border-color: var(--accent, var(--text)); }
-.lock-err { color: #ff6b6b; font-size: var(--t-footnote); min-height: 16px; margin-bottom: 6px; }
+.lock-err { color: var(--destructive); font-size: var(--t-footnote); min-height: 16px; margin-bottom: 6px; }
 .lock-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 8px auto 0; max-width: 260px; }
 .lock-key {
   height: 64px; border-radius: 50%; border: none; cursor: pointer;
@@ -826,16 +834,16 @@ canvas { display: block; max-width: 100%; }
 .chat-mic:active { transform: scale(0.92); }
 .chat-mic.busy { opacity: 0.6; cursor: default; }
 .chat-mic.rec {
-  background: #ff453a;
-  border-color: #ff453a;
+  background: var(--destructive);
+  border-color: var(--destructive);
   color: white;
-  box-shadow: 0 0 0 0 rgba(255,69,58,0.6);
+  box-shadow: 0 0 0 0 rgba(var(--destructive-rgb),0.6);
   animation: micPulse 1.3s ease-out infinite;
 }
 @keyframes micPulse {
-  0% { box-shadow: 0 0 0 0 rgba(255,69,58,0.55); }
-  70% { box-shadow: 0 0 0 14px rgba(255,69,58,0); }
-  100% { box-shadow: 0 0 0 0 rgba(255,69,58,0); }
+  0% { box-shadow: 0 0 0 0 rgba(var(--destructive-rgb),0.55); }
+  70% { box-shadow: 0 0 0 14px rgba(var(--destructive-rgb),0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--destructive-rgb),0); }
 }
 
 /* hidden-атрибут ДОЛЖЕН скрывать элемент, даже если ниже задан display:flex */
@@ -1114,7 +1122,7 @@ body.has-cursor .cursor-dot, body.has-cursor .cursor-ring {
   font-size: var(--t-body); cursor: pointer; text-align: left;
   transition: all 0.18s; font-family: inherit;
 }
-.test-item.done { border-color: rgba(48,209,88,0.35); background: rgba(48,209,88,0.06); }
+.test-item.done { border-color: rgba(var(--accent-2-rgb),0.40); background: rgba(var(--accent-2-rgb),0.07); }
 .test-emoji { font-size: 20px; }
 .test-title { flex: 1; font-weight: 500; }
 .test-state { font-size: var(--t-footnote); color: var(--hint); }
@@ -1239,7 +1247,7 @@ a:focus:not(:focus-visible),
   transition: transform .12s ease, background .12s ease;
 }
 .pf-like-btn:active { transform: scale(.95); }
-.pf-heart { color: #e0566a; font-size: 1.05em; line-height: 1; }
+.pf-heart { color: var(--destructive); font-size: 1.05em; line-height: 1; }
 .pf-box { margin-top: 12px; }
 .pf-box-t { font-size: var(--t-footnote); color: var(--hint); margin-bottom: 7px; line-height: 1.45; }
 
@@ -1388,8 +1396,8 @@ a:focus:not(:focus-visible),
 .composer-btn.on { color: var(--accent); }
 .composer-btn.busy { opacity: 0.6; cursor: default; }
 .composer-btn.rec {
-  color: #fff; background: var(--ring-bad);
-  box-shadow: 0 0 0 0 rgba(194,104,63,0.55);
+  color: #fff; background: var(--destructive);
+  box-shadow: 0 0 0 0 rgba(var(--destructive-rgb),0.55);
   animation: micPulse 1.3s ease-out infinite;
 }
 .composer-send {
@@ -1474,7 +1482,33 @@ a:focus:not(:focus-visible),
 .collapsible.collapsed .collapse-chevron .ico { transform: rotate(-90deg); }
 .collapse-body { overflow: hidden; max-height: 1600px; transition: max-height 0.35s ease; margin-top: 14px; }
 .collapsible.collapsed .collapse-body { max-height: 0; margin-top: 0; }
-.dossier-sub { margin-top: 22px; margin-bottom: 8px; font-family: var(--font-display); font-weight: 600; color: var(--text); }
+.dossier-sub { margin-top: 22px; margin-bottom: 6px; font-family: var(--font-display); font-weight: 600; color: var(--text); }
+.collapse-body > .dossier-sub:first-child { margin-top: 4px; }
+
+/* ── SOUL: нарядный блок-основа портрета (тесты + досье + о себе) ── */
+.soul-card {
+  background: linear-gradient(165deg, var(--grad-spectrum-soft) 0%, transparent 60%), var(--glass);
+  border-color: rgba(var(--accent-rgb), 0.28);
+  box-shadow: var(--glass-highlight), 0 16px 40px rgba(var(--accent-rgb), 0.10);
+}
+.soul-head { align-items: center; }
+.soul-head-l { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.soul-ico {
+  width: 40px; height: 40px; border-radius: 13px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--grad-spectrum); color: #fff;
+  box-shadow: 0 8px 20px rgba(var(--accent-rgb), 0.38);
+}
+.soul-ico .ico { width: 21px; height: 21px; stroke: #fff; }
+.soul-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.soul-title {
+  font-family: var(--font-display); font-weight: 700; font-size: var(--t-title-3);
+  letter-spacing: 2px; line-height: 1; text-transform: lowercase;
+  background: var(--grad-spectrum); -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.soul-sub { font-size: var(--t-footnote); color: var(--hint); font-weight: 400; line-height: 1.3; }
+.soul-card .collapse-chevron .ico { width: 22px; height: 22px; }
 
 /* iOS: множественные backdrop-filter на фикс/sticky-элементах вешают скролл чата.
    На узких экранах отключаем размытие — фон и так почти непрозрачный. */
