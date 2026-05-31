@@ -1553,12 +1553,14 @@ a:focus:not(:focus-visible),
 }
 .chart-lock svg { width: 16px; height: 16px; opacity: .7; flex: none; }
 
-/* столбчатый график отметок */
-.bar-chart {
-  display: flex; align-items: flex-end; gap: 4px;
-  height: 64px; padding: 4px 0;
-}
-.bar-chart .bar { flex: 1; min-width: 4px; border-radius: 3px 3px 0 0; opacity: .85; }
+/* из чего складывается оценка */
+.comp-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.comp-l { width: 92px; flex: none; line-height: 1.15; }
+.comp-l b { font-size: var(--t-footnote); color: var(--text); }
+.comp-sub { display: block; font-size: 10px; color: var(--hint); }
+.comp-track { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-strong); overflow: hidden; }
+.comp-fill { height: 100%; border-radius: 999px; transition: width .5s ease; }
+.comp-v { width: 28px; flex: none; text-align: right; font-size: var(--t-footnote); color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* баннер «добавить на домашний экран» */
 .install-banner {

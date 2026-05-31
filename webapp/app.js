@@ -234,8 +234,23 @@ function lockStateText() {
   const pin = !!localStorage.getItem(LOCK_PIN), face = !!localStorage.getItem(LOCK_FACE);
   el.textContent = !pin ? "выключена" : face ? "код + Face ID" : "код";
 }
+async function offerLockSetup() {
+  const ok = await showLock("set1");
+  if (!ok) return;
+  lockStateText();
+  if (window.PublicKeyCredential && confirm("Код установлен. Добавить вход по Face ID?")) {
+    if (await registerFace()) lockStateText();
+    else alert("Face ID недоступен на этом устройстве");
+  }
+}
+function maybeOfferLock() {
+  if (lockEnabled()) return;
+  try { if (localStorage.getItem("mood_lock_offered")) return; localStorage.setItem("mood_lock_offered", "1"); } catch (_) { return; }
+  setTimeout(() => { if (confirm("Защитить вход в MOOD? Можно поставить код или Face ID.")) offerLockSetup(); }, 900);
+}
 function setupLockUI() {
   lockStateText();
+  maybeOfferLock();                          // при первом входе предложить защиту
   const btn = $("lockBtn"); if (!btn) return;
   btn.onclick = async () => {
     haptic("medium");
@@ -245,13 +260,7 @@ function setupLockUI() {
       if (ok) { localStorage.removeItem(LOCK_PIN); localStorage.removeItem(LOCK_FACE); lockStateText(); }
       return;
     }
-    const ok = await showLock("set1");
-    if (!ok) return;
-    lockStateText();
-    if (window.PublicKeyCredential && confirm("Код установлен. Добавить вход по Face ID?")) {
-      if (await registerFace()) lockStateText();
-      else alert("Face ID недоступен на этом устройстве");
-    }
+    await offerLockSetup();
   };
 }
 
@@ -439,7 +448,8 @@ function switchView(view, animate) {
    оверлей-слой ставится ТОЛЬКО на время жеста — вне свайпа вёрстка не меняется. */
 function setupSwipe() {
   const app = $("app");
-  let sx = 0, sy = 0, locked = null, vw = 0, from = null, to = null, sign = 0, dragging = false;
+  let sx = 0, sy = 0, locked = null, vw = 0, from = null, to = null, sign = 0, dragging = false, fromScroll = 0;
+  const scrollTop = () => window.scrollY || document.documentElement.scrollTop || 0;
 
   const reHide = () => {
     $("chatView").hidden = curView !== "chat";
@@ -449,7 +459,7 @@ function setupSwipe() {
 
   app.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) { locked = "v"; return; }
-    if (e.target.closest("input, textarea, .mood-chart, .bar-chart, .trend-wrap, .diary-menu, .test-modal, .test-sheet, .pf-box")) { locked = "v"; return; }
+    if (e.target.closest("input, textarea, .mood-chart, .trend-wrap, .diary-menu, .test-modal, .test-sheet, .pf-box")) { locked = "v"; return; }
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; vw = window.innerWidth;
     locked = null; dragging = false;
   }, { passive: true });
@@ -458,21 +468,23 @@ function setupSwipe() {
     if (locked === "v") return;
     const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
     if (!locked) {
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-      if (Math.abs(dx) <= Math.abs(dy)) { locked = "v"; return; }   // вертикаль → нативный скролл
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+      if (Math.abs(dx) < Math.abs(dy) * 1.3) { locked = "v"; return; }   // вертикаль → нативный скролл
       const i = VIEWS.indexOf(curView), ti = dx < 0 ? i + 1 : i - 1;
-      if (ti < 0 || ti >= VIEWS.length) { locked = "v"; return; }    // нет соседа
+      if (ti < 0 || ti >= VIEWS.length) { locked = "v"; return; }        // нет соседа
       locked = "h"; dragging = true; sign = dx < 0 ? 1 : -1;
+      fromScroll = scrollTop();                                          // запоминаем прокрутку, чтобы не прыгало
       from = viewEl(curView); to = viewEl(VIEWS[ti]);
       to.hidden = false;
       from.classList.add("swipe-layer"); to.classList.add("swipe-layer");
+      from.style.transform = `translate(0px, ${-fromScroll}px)`;
       to.style.transform = `translateX(${sign * vw}px)`;
     }
     if (locked === "h") {
       e.preventDefault();
       let d = Math.max(-vw, Math.min(vw, e.touches[0].clientX - sx));
-      if ((sign > 0 && d > 0) || (sign < 0 && d < 0)) d = 0;        // не тянуть в пустую сторону
-      from.style.transform = `translateX(${d}px)`;
+      if ((sign > 0 && d > 0) || (sign < 0 && d < 0)) d = 0;            // не тянуть в пустую сторону
+      from.style.transform = `translate(${d}px, ${-fromScroll}px)`;
       to.style.transform = `translateX(${sign * vw + d}px)`;
     }
   }, { passive: false });
@@ -480,19 +492,20 @@ function setupSwipe() {
   app.addEventListener("touchend", (e) => {
     if (locked !== "h" || !dragging) { locked = null; return; }
     const d = e.changedTouches[0].clientX - sx;
-    const commit = Math.abs(d) > vw * 0.28;
-    const fEl = from, tEl = to, s = sign;
+    const commit = Math.abs(d) > vw * 0.25;
+    const fEl = from, tEl = to, s = sign, fs = fromScroll;
     const target = commit ? VIEWS[VIEWS.indexOf(curView) + (s > 0 ? 1 : -1)] : null;
     fEl.classList.add("animate"); tEl.classList.add("animate");
-    fEl.style.transform = `translateX(${commit ? -s * vw : 0}px)`;
+    fEl.style.transform = `translate(${commit ? -s * vw : 0}px, ${-fs}px)`;
     tEl.style.transform = `translateX(${commit ? 0 : s * vw}px)`;
     if (commit) haptic();
     setTimeout(() => {
       fEl.classList.remove("swipe-layer", "animate"); tEl.classList.remove("swipe-layer", "animate");
       fEl.style.transform = ""; tEl.style.transform = "";
       if (commit && target) switchView(target, false);
+      else window.scrollTo(0, fs);                                      // отмена — вернуть прокрутку на место
       reHide();
-    }, 270);
+    }, 260);
     locked = null; dragging = false; from = to = null;
   }, { passive: true });
 }
@@ -1165,18 +1178,15 @@ function renderMood(s) {
   animateNum($("moodNum"), m);
   $("moodCap").textContent = MOOD_WORD(m);
   const hist = s.mood_history || [];
-  const chart = $("moodChart");
-  if (chart) {
-    const spark = sparkline(hist);
-    chart.innerHTML = spark
-      ? `<div class="mood-chart-cap">динамика · ${hist.length} ${plural(hist.length, "отметка", "отметки", "отметок")}</div>${spark}`
-      : chartLock(`динамика появится после ${Math.max(0, 2 - hist.length)} ${plural(Math.max(0, 2 - hist.length), "отметки", "отметок", "отметок")}`);
-  }
-  const bars = $("moodBars");
-  if (bars) {
-    bars.innerHTML = hist.length >= 3
-      ? `<div class="mood-chart-cap">последние отметки</div>${barChart(hist)}`
-      : chartLock(`график по дням — нужно ещё ${Math.max(0, 3 - hist.length)} ${plural(Math.max(0, 3 - hist.length), "отметка", "отметки", "отметок")}`);
+  // из чего складывается оценка — наглядно, понятнее чем абстрактные «отметки»
+  const comp = $("moodChart");
+  if (comp) comp.innerHTML = moodComposition(s);
+  // тренд во времени — только когда реально накопились отметки
+  const tr = $("moodBars");
+  if (tr) {
+    tr.innerHTML = hist.length >= 3
+      ? `<div class="mood-chart-cap">как менялось со временем</div>${sparkline(hist)}`
+      : chartLock(`тренд появится, когда отметишь настроение ещё ${Math.max(0, 3 - hist.length)} ${plural(Math.max(0, 3 - hist.length), "раз", "раза", "раз")} (в дневнике)`);
   }
 }
 
@@ -1185,15 +1195,21 @@ function chartLock(text) {
   return `<div class="chart-lock">${ico("lock")}<span>${text}</span></div>`;
 }
 
-/* barChart: столбики по последним отметкам MOOD, цвет по уровню */
-function barChart(hist) {
-  const last = hist.slice(-14);
-  const bars = last.map((h) => {
-    const v = Math.max(0, Math.min(100, h.score || 0));
-    const col = v >= 65 ? "#30d158" : v >= 45 ? "#ffd60a" : "#ff9f0a";
-    return `<div class="bar" style="height:${Math.max(8, v)}%;background:${col}"></div>`;
-  }).join("");
-  return `<div class="bar-chart">${bars}</div>`;
+/* из чего складывается MOOD: база (тесты) + сейчас (дневник+разговоры) */
+function moodComposition(s) {
+  const bar = (label, sub, val) => {
+    if (val == null) {
+      return `<div class="comp-row"><div class="comp-l"><b>${label}</b><span class="comp-sub">${sub}</span></div>` +
+             `<div class="comp-track"></div><div class="comp-v">—</div></div>`;
+    }
+    const v = Math.round(val), col = v >= 65 ? "#30d158" : v >= 45 ? "#ffd60a" : "#ff9f0a";
+    return `<div class="comp-row"><div class="comp-l"><b>${label}</b><span class="comp-sub">${sub}</span></div>` +
+           `<div class="comp-track"><div class="comp-fill" style="width:${v}%;background:${col}"></div></div>` +
+           `<div class="comp-v">${v}</div></div>`;
+  };
+  return `<div class="mood-chart-cap">из чего складывается</div>` +
+    bar("база", "тесты о тебе", s.mood_base) +
+    bar("сейчас", "дневник + разговоры", s.mood_dynamic);
 }
 
 /* sparkline: SVG-полилиния по истории MOOD */

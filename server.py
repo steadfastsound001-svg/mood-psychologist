@@ -312,6 +312,7 @@ class Handler(BaseHTTPRequestHandler):
             "sessions": sessions, "user_msgs": st["user_msgs"], "days_since_reg": round(days, 1),
             "streak": streak,
             "mood": mood, "mood_remaining": max(0, MOOD_MIN_SESSIONS - sessions),
+            "mood_base": test_mood, "mood_dynamic": dyn_score,
             "mood_today": store.mood_today(uid),
             "mood_history": store.mood_history(uid, 30),
             "tests": tests_done, "portrait": portrait_done,
