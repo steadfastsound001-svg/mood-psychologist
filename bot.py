@@ -1797,7 +1797,7 @@ def main() -> None:
         except Exception as e:
             print(f"[diary-notes] {e}", flush=True)
 
-    app.job_queue.run_repeating(_diary_to_notes, interval=1800, first=20)
+    app.job_queue.run_repeating(_diary_to_notes, interval=120, first=15)
 
     async def _post_init(application):
         await _register_menu_button(application)

@@ -71,6 +71,55 @@ def _model_for_task(task: str | None) -> str | None:
     return None
 
 
+# ───────────── пер-модельные анти-ИИ фильтры ─────────────
+# Каждый гасит ИМЕННО почерк своей модели. Подставляется ПЕРВЫМ, перед общим
+# характером агента (SYSTEM_BASE). Привязан к реально выбранной модели (и на фолбэке).
+# Источники по анти-sycophancy: floydous gist (210+ papers), FutureSpeakAI/anti-sycophancy, Simon Willison.
+_FILTER_GPT = (
+    "[анти-почерк модели GPT — соблюдай строго]\n"
+    "у GPT сильный RLHF-подхалимаж и узнаваемый почерк. ГАСИ:\n"
+    "— ноль лести и поддакивания. не хвали реплики и вопросы («хороший вопрос», «отличное наблюдение», «ты молодец»). не подстраивайся под настроение, чтобы понравиться.\n"
+    "— не соглашайся, если человек неправ: мягко, но прямо назови нестыковку (devil's advocate). честность важнее комфорта.\n"
+    "— убери эмоциональную вату и реверансы: «рад помочь», «понимаю тебя», «это нормально», «ты не один».\n"
+    "— под нож GPT-маркеры: «Безусловно», «Конечно!», «Важно отметить», «Стоит подчеркнуть», вводные-извинения, список-на-каждый-ответ, тире-вставки, жирнота на каждом слове, концовка-резюме «в итоге/таким образом».\n"
+    "— не знаешь — скажи. сомнение проговаривай, не сглаживай."
+)
+_FILTER_DEEPSEEK = (
+    "[анти-почерк DeepSeek]\n"
+    "DeepSeek тянет в многословие, формальность и over-структуру. ГАСИ: без длинных перечислений и «во-первых/во-вторых», без морали, не дублируй мысль синонимами, без концовки-вывода. короче и живее."
+)
+_FILTER_QWEN = (
+    "[анти-почерк Qwen]\n"
+    "Qwen тянет в избыточную вежливость, формальные связки и пере-объяснение. ГАСИ: без «конечно», без длинных преамбул, не разжёвывай очевидное, живой русский, не калька с английского."
+)
+_FILTER_LLAMA = (
+    "[анти-почерк Llama]\n"
+    "Llama тянет в дисклеймеры и хедж. ГАСИ: без оговорок «я всего лишь ИИ», без лишних предупреждений, прямо и по делу."
+)
+# порядок важен: специфичное раньше общего
+MODEL_FILTERS = [
+    ("gpt-5", _FILTER_GPT), ("gpt-4", _FILTER_GPT), ("gpt-oss", _FILTER_GPT),
+    ("deepseek", _FILTER_DEEPSEEK), ("qwen", _FILTER_QWEN), ("llama", _FILTER_LLAMA),
+    ("openai/", _FILTER_GPT),
+]
+
+
+def _model_filter(model: str) -> str:
+    m = (model or "").lower()
+    for key, snip in MODEL_FILTERS:
+        if key in m:
+            return snip
+    return ""
+
+
+def _sys_for_model(model: str, base_sys: str) -> str:
+    """Пер-модельный фильтр ПЕРЕД общим характером."""
+    f = _model_filter(model)
+    if not f:
+        return base_sys
+    return f + "\n\n" + base_sys if base_sys else f
+
+
 # Фолбэк-цепочка: если нужная модель rate-limit, идём по альтернативам.
 _FALLBACK_EXTRA = [
     "qwen/qwen3-next-80b-a3b-instruct:free",
@@ -223,9 +272,12 @@ class _Messages:
             chat.append({"role": m.get("role", "user"), "content": _flatten_content(m.get("content", ""))})
 
         models = _chain(task, model)
+        has_sys = bool(chat) and chat[0]["role"] == "system"
         last_err: Exception | None = None
         for m in models:
             try:
+                if has_sys:
+                    chat[0]["content"] = _sys_for_model(m, sys_text)   # пер-модельный фильтр
                 return self._post(m, chat, max_tokens)
             except Exception as e:
                 last_err = e
@@ -286,6 +338,8 @@ def stream_completion_sync(
         if ph is None:
             continue
         url, headers = ph
+        if sys_text:
+            chat[0]["content"] = _sys_for_model(m, sys_text)   # пер-модельный фильтр
         body = {"model": m, "messages": chat, "stream": True, **_token_body(m, max_tokens)}
         got_any = False
         try:
@@ -343,6 +397,8 @@ async def stream_completion(
         if ph is None:
             continue
         url, headers = ph
+        if sys_text:
+            chat[0]["content"] = _sys_for_model(m, sys_text)   # пер-модельный фильтр
         body = {"model": m, "messages": chat, "stream": True, **_token_body(m, max_tokens)}
         try:
             async with httpx.AsyncClient(timeout=180) as cli:
