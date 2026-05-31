@@ -62,6 +62,17 @@
   .pipe li:last-child{ border-bottom:none; }
   .pipe li:before{ content:"▸"; position:absolute; left:6px; color:var(--accent); }
   .pipe li b{ color:var(--text); }
+  .cfg{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .cfg-h{ display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .cfg-h b{ font-size:14px; }
+  .cfg-d{ color:var(--hint); font-size:12px; margin-bottom:8px; }
+  .cfg-area{ width:100%; min-height:120px; resize:vertical; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px/1.5 ui-monospace,Menlo,monospace; }
+  .cfg-input{ width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:14px inherit; }
+  .cfg-act{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  .cfg-btn{ background:var(--accent); color:#1a1410; border:none; border-radius:8px; padding:8px 16px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; }
+  .cfg-btn.ghost{ background:transparent; color:var(--hint); border:1px solid var(--line); font-weight:400; }
+  .cfg-flash{ color:var(--good); font-size:12px; }
+  .cfg-flash.bad{ color:var(--bad); }
 </style>
 </head>
 <body>
@@ -228,15 +239,76 @@ function renderHow(){
 }
 
 let curTab="users";
+/* ───────── вкладка «техника»: управление промптами + базы ───────── */
+async function apiPost(path, body){
+  const r=await fetch(path,{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok) throw Object.assign(new Error("HTTP "+r.status),{status:r.status});
+  return r.json();
+}
+const CAT_TITLE={order:"порядок слоёв промпта",setting:"настройки",prompt:"промпты (на всех этапах)",filter:"фильтры под модель"};
+function dbInfo(){
+  const rows=[
+    ["профиль","portrait (что видит клиент), ответы тестов, инсайты «что узнал», настрой за 10 дней"],
+    ["переписка","все сообщения чата (одна база на TG и приложение)"],
+    ["дневник","записи + короткие отклики психолога"],
+    ["отметки настроения","для графика динамики MOOD"],
+    ["досье","загруженные тобой файлы про себя"],
+    ["лайки портрета","твои отзывы — агент учится писать портрет точнее"],
+    ["конфиг агента","эти самые промпты и настройки (редактируются ниже)"],
+  ];
+  const ul=el("ul",{class:"pipe"}); rows.forEach(([a,b])=>ul.append(el("li",null,el("b",{text:a})," — "+b)));
+  return card("Базы данных в работе","Что и где хранится про тебя.",ul);
+}
+function flash(box,msg,bad){ const f=el("span",{class:"cfg-flash"+(bad?" bad":""),text:msg}); box.append(f); setTimeout(()=>f.remove(),1800); }
+function cfgEditor(it){
+  const box=el("div",{class:"cfg"});
+  box.append(el("div",{class:"cfg-h"}, el("b",{text:it.label}), it.overridden?el("span",{class:"pill on",text:"изменён"}):null));
+  if(it.desc) box.append(el("div",{class:"cfg-d",text:it.desc}));
+  const multiline = it.cat==="prompt"||it.cat==="filter";
+  const field = multiline ? el("textarea",{class:"cfg-area"}) : el("input",{class:"cfg-input"});
+  field.value = it.value || it.default;
+  box.append(field);
+  const act=el("div",{class:"cfg-act"});
+  const save=el("button",{class:"cfg-btn",text:"сохранить"});
+  save.onclick=async()=>{ save.textContent="…"; try{ await apiPost("/api/admin/config",{key:it.key,value:field.value}); flash(box,"сохранено · бот учтёт за ~15 сек ✓"); }catch(e){ flash(box,"ошибка: "+e.message,true);} save.textContent="сохранить"; };
+  act.append(save);
+  if(it.cat==="order"){
+    const swap=el("button",{class:"cfg-btn ghost",text:"поменять блоки местами"});
+    swap.onclick=()=>{ field.value=field.value.split(",").map(s=>s.trim()).filter(Boolean).reverse().join(","); };
+    act.append(swap);
+  }
+  const rst=el("button",{class:"cfg-btn ghost",text:"вернуть как было"});
+  rst.onclick=async()=>{ try{ await apiPost("/api/admin/config",{key:it.key,reset:true}); field.value=it.default; flash(box,"сброшено к дефолту"); }catch(e){ flash(box,"ошибка",true);} };
+  act.append(rst);
+  box.append(act);
+  return box;
+}
+async function renderTech(){
+  clear($("stats"));
+  const c=$("content"); clear(c); c.append(el("div",{class:"muted",text:"загружаю…"}));
+  let data;
+  try{ data=await api("/api/admin/config"); }
+  catch(e){ showErr(e.status===403?"доступ только для владельца":"ошибка: "+e.message); return; }
+  clear(c); c.append(dbInfo());
+  const items=data.items||[];
+  ["order","setting","filter","prompt"].forEach(cat=>{
+    const list=items.filter(i=>i.cat===cat); if(!list.length) return;
+    const wrap=el("div",{class:"card2"}, el("h2",{text:CAT_TITLE[cat]||cat}));
+    if(cat==="order") wrap.append(el("div",{class:"lead",text:"фильтр модели всегда идёт первым. дальше — в этом порядке. перетасуй — меняешь хронологию подачи агенту."}));
+    list.forEach(it=>wrap.append(cfgEditor(it)));
+    c.append(wrap);
+  });
+}
+
 function buildTabs(){
   const t=$("tabs"); clear(t);
-  [["users","тестировщики"],["how","как работает"]].forEach(([id,label])=>
+  [["users","тестировщики"],["how","как работает"],["tech","техника"]].forEach(([id,label])=>
     t.append(el("button",{class:"tab"+(curTab===id?" on":""),onclick:()=>switchTab(id),text:label})));
 }
 function switchTab(id){
   curTab=id; buildTabs();
   $("stats").style.display = id==="users" ? "flex" : "none";
-  if(id==="users") load(); else renderHow();
+  if(id==="users") load(); else if(id==="how") renderHow(); else renderTech();
 }
 buildTabs();
 switchTab("users");

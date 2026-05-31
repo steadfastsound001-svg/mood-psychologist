@@ -127,6 +127,8 @@ _SCHEMA = [
     """CREATE TABLE IF NOT EXISTS portrait_feedback(
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
       liked INTEGER DEFAULT 1, text TEXT DEFAULT '', ts REAL)""",
+    """CREATE TABLE IF NOT EXISTS agent_config(
+      key TEXT PRIMARY KEY, value TEXT DEFAULT '', updated_at REAL)""",
 ]
 
 
@@ -459,6 +461,19 @@ def portrait_feedback_blob(user_id: int, limit: int = 25) -> str:
         t = (r.get("text") or "").strip()
         parts.append(f"[{mark}] {t}" if t else f"[{mark}]")
     return "\n".join(parts)
+
+
+# ───────────── конфиг агента (редактируемые промпты/настройки) ─────────────
+
+def all_config() -> dict:
+    rows = query("SELECT key, value FROM agent_config")
+    return {r["key"]: (r.get("value") or "") for r in rows}
+
+
+def set_config(key: str, value: str) -> None:
+    execute("INSERT INTO agent_config(key, value, updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (key, value or "", time.time()))
 
 
 # ───────────── stats (сеансы / возраст аккаунта) ─────────────

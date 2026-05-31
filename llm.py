@@ -96,19 +96,25 @@ _FILTER_LLAMA = (
     "[анти-почерк Llama]\n"
     "Llama тянет в дисклеймеры и хедж. ГАСИ: без оговорок «я всего лишь ИИ», без лишних предупреждений, прямо и по делу."
 )
-# порядок важен: специфичное раньше общего
-MODEL_FILTERS = [
-    ("gpt-5", _FILTER_GPT), ("gpt-4", _FILTER_GPT), ("gpt-oss", _FILTER_GPT),
-    ("deepseek", _FILTER_DEEPSEEK), ("qwen", _FILTER_QWEN), ("llama", _FILTER_LLAMA),
-    ("openai/", _FILTER_GPT),
+import agent_config
+agent_config.register("filter_gpt", _FILTER_GPT, "Фильтр модели: GPT", "Глушит подхалимаж и почерк GPT. Включается на gpt-* и gpt-oss.", "filter", 1)
+agent_config.register("filter_deepseek", _FILTER_DEEPSEEK, "Фильтр модели: DeepSeek", "Глушит многословие DeepSeek.", "filter", 2)
+agent_config.register("filter_qwen", _FILTER_QWEN, "Фильтр модели: Qwen", "Глушит вежливость/кальку Qwen.", "filter", 3)
+agent_config.register("filter_llama", _FILTER_LLAMA, "Фильтр модели: Llama", "Глушит дисклеймеры Llama.", "filter", 4)
+
+# (подстрока в имени модели) -> ключ конфига фильтра. порядок: специфичное раньше общего.
+_FILTER_KEYS = [
+    ("gpt-5", "filter_gpt"), ("gpt-4", "filter_gpt"), ("gpt-oss", "filter_gpt"),
+    ("deepseek", "filter_deepseek"), ("qwen", "filter_qwen"), ("llama", "filter_llama"),
+    ("openai/", "filter_gpt"),
 ]
 
 
 def _model_filter(model: str) -> str:
     m = (model or "").lower()
-    for key, snip in MODEL_FILTERS:
-        if key in m:
-            return snip
+    for sub, key in _FILTER_KEYS:
+        if sub in m:
+            return agent_config.cfg(key, "")
     return ""
 
 

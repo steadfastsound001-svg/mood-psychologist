@@ -24,6 +24,30 @@ import onboarding
 import stt
 from llm import Anthropic, stream_completion_sync
 from agent_core import user_system, ANTI_AI
+import agent_config
+
+# ── редактируемые вторичные промпты (дефолты; админка может переопределить) ──
+WEEKLY_PROMPT = ("ты психолог. на входе — реплики клиента за неделю. напиши тёплые итоги недели.\n\n"
+                 "формат строго такой, ровно 3 блока, между блоками — пустая строка:\n"
+                 "**в фокусе** — что занимало тебя на этой неделе, 1-2 фразы\n\n"
+                 "**сдвиг** — что изменилось или начало меняться, 1-2 фразы\n\n"
+                 "**ориентир** — один мягкий, конкретный шаг на следующую неделю, 1 фраза\n\n"
+                 "правила: на «ты», строчные буквы, живой язык, без воды. жирным — только три заголовка блоков "
+                 "(**в фокусе**, **сдвиг**, **ориентир**), больше никакого markdown, ни тире-списков, ни цифр-пунктов. "
+                 "только из реплик клиента, не выдумывай.\n\n" + ANTI_AI)
+DYNMOOD_PROMPT = ("ты психолог. на входе — дневник и реплики клиента за последние 10 дней. "
+                  "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично). "
+                  "дай: note — одну короткую строку-резюме; desc — 2-3 предложения о том, как человек "
+                  "чувствовал себя эти 10 дней (что было в фокусе, какие колебания, на чём держался). "
+                  "на «ты», строчные, тепло и по делу, без воды и без markdown.\n\n" + ANTI_AI + "\n\n"
+                  "верни СТРОГО JSON: {\"score\": <int>, \"note\": \"<строка>\", \"desc\": \"<2-3 предложения>\"}")
+DIARY_FB_PROMPT = ("ты психолог, читаешь запись дневника клиента. дай короткий отклик-ревью — "
+                   "1-2 строки, на «ты», строчные. ТОЛЬКО наблюдение/отражение того, что видишь в записи. "
+                   "НЕ задавай вопросов — это не диалог, а отклик на запись. без советов-шаблонов, "
+                   "без «понимаю/я рядом/это нормально», без markdown. только по сути записи.\n\n" + ANTI_AI)
+agent_config.register("weekly_prompt", WEEKLY_PROMPT, "Итоги недели", "3 блока: в фокусе / сдвиг / ориентир.", "prompt", 5)
+agent_config.register("dynmood_prompt", DYNMOOD_PROMPT, "Настрой за 10 дней", "Число 0-100 + резюме по дневнику и чату. ВНИМАНИЕ: должен возвращать строгий JSON.", "prompt", 6)
+agent_config.register("diary_feedback_prompt", DIARY_FB_PROMPT, "Отклик на запись дневника", "Короткое ревью без вопросов.", "prompt", 7)
 
 client = Anthropic()  # для нестримовых вызовов (weekly/opener)
 
@@ -60,12 +84,7 @@ def _dyn_mood_compute(uid, entries):
         chat_blob = "\n".join(f"— {c[:400]}" for c in chat_lines)
         blob = "[записи дневника]\n" + (diary_blob or "(нет)") + \
                "\n\n[реплики в разговорах с психологом]\n" + (chat_blob or "(нет)")
-        sys = ("ты психолог. на входе — дневник и реплики клиента за последние 10 дней. "
-               "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично). "
-               "дай: note — одну короткую строку-резюме; desc — 2-3 предложения о том, как человек "
-               "чувствовал себя эти 10 дней (что было в фокусе, какие колебания, на чём держался). "
-               "на «ты», строчные, тепло и по делу, без воды и без markdown.\n\n" + ANTI_AI + "\n\n"
-               "верни СТРОГО JSON: {\"score\": <int>, \"note\": \"<строка>\", \"desc\": \"<2-3 предложения>\"}")
+        sys = agent_config.cfg("dynmood_prompt", DYNMOOD_PROMPT)
         resp = client.messages.create(
             system=sys, messages=[{"role": "user", "content": blob}],
             max_tokens=400, task="fast",
@@ -338,7 +357,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             for delta in stream_completion_sync(
                 system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=150, task="dialog",
+                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 150), task="dialog",
             ):
                 acc.append(delta)
                 try:
@@ -404,14 +423,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(user_texts) < 3:
             return ""
         blob = "\n".join(f"— {t}" for t in user_texts[-40:])
-        sys = ("ты психолог. на входе — реплики клиента за неделю. напиши тёплые итоги недели.\n\n"
-               "формат строго такой, ровно 3 блока, между блоками — пустая строка:\n"
-               "**в фокусе** — что занимало тебя на этой неделе, 1-2 фразы\n\n"
-               "**сдвиг** — что изменилось или начало меняться, 1-2 фразы\n\n"
-               "**ориентир** — один мягкий, конкретный шаг на следующую неделю, 1 фраза\n\n"
-               "правила: на «ты», строчные буквы, живой язык, без воды. жирным — только три заголовка блоков "
-               "(**в фокусе**, **сдвиг**, **ориентир**), больше никакого markdown, ни тире-списков, ни цифр-пунктов. "
-               "только из реплик клиента, не выдумывай.\n\n" + ANTI_AI)
+        sys = agent_config.cfg("weekly_prompt", WEEKLY_PROMPT)
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": blob}],
@@ -453,10 +465,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _diary_feedback(self, text):
         """Короткий психологический отклик на запись дневника (1-2 строки, голос психолога)."""
-        sys = ("ты психолог, читаешь запись дневника клиента. дай короткий отклик-ревью — "
-               "1-2 строки, на «ты», строчные. ТОЛЬКО наблюдение/отражение того, что видишь в записи. "
-               "НЕ задавай вопросов — это не диалог, а отклик на запись. без советов-шаблонов, "
-               "без «понимаю/я рядом/это нормально», без markdown. только по сути записи.\n\n" + ANTI_AI)
+        sys = agent_config.cfg("diary_feedback_prompt", DIARY_FB_PROMPT)
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": text[:4000]}],
@@ -532,6 +541,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self._owner():
                 self._json(403, {"error": "forbidden"}); return
             self._json(200, {"owner_email": OWNER_EMAIL, "users": store.admin_overview()}); return
+        if p == "/api/admin/config":
+            if not self._owner():
+                self._json(403, {"error": "forbidden"}); return
+            self._json(200, {"items": agent_config.all_items()}); return
         if p == "/api/admin/user":
             if not self._owner():
                 self._json(403, {"error": "forbidden"}); return
@@ -603,6 +616,18 @@ class Handler(BaseHTTPRequestHandler):
                 prof = store.get_profile(user["id"])
                 self._json(200, {"token": store.create_session(user["id"]), "user": user,
                                  "onboarded": bool(prof.get("onboarded"))}); return
+
+            if u.path == "/api/admin/config":
+                if not self._owner():
+                    self._json(403, {"error": "forbidden"}); return
+                key = (body.get("key") or "").strip()
+                if not key:
+                    self._json(400, {"error": "no key"}); return
+                if body.get("reset"):
+                    agent_config.reset_item(key)
+                else:
+                    agent_config.set_item(key, body.get("value") or "")
+                self._json(200, {"ok": True, "items": agent_config.all_items()}); return
 
             user = store.user_by_token(self._bearer())
             if not user:

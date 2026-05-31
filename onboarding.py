@@ -9,6 +9,7 @@ import os
 
 from llm import Anthropic
 from agent_core import ANTI_AI
+import agent_config
 
 client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
@@ -136,6 +137,9 @@ COMPILE_PROMPT = """ты — психолог высокого класса, к�
 
 выдай только портрет."""
 
+agent_config.register("compile_prompt", COMPILE_PROMPT, "Портрет (что видит клиент)",
+                      "Как агент пишет портрет-зеркало: 5 блоков, глубина, учёт фидбека.", "prompt", 4)
+
 
 def _answers_blob(answers: dict, raw_info: str, extra: dict | None, documents: str,
                   diary: str = "", feedback: str = "") -> str:
@@ -183,7 +187,7 @@ def compile_profile(answers: dict, raw_info: str = "", extra: dict | None = None
     blob = _answers_blob(answers, raw_info, extra, documents, diary, feedback)
     resp = client.messages.create(
         max_tokens=2200,
-        system=COMPILE_PROMPT,
+        system=agent_config.cfg("compile_prompt", COMPILE_PROMPT),
         messages=[{"role": "user", "content": blob}],
         task="analysis",
     )

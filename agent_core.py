@@ -5,6 +5,9 @@
 import re
 from pathlib import Path
 
+import agent_config
+from agent_config import cfg
+
 # SOUL.md — слой «души»/голоса (по образцу OpenClaw). Высший приоритет в system.
 try:
     SOUL = (Path(__file__).parent / "SOUL.md").read_text(encoding="utf-8").strip()
@@ -149,12 +152,33 @@ ANTI_AI = (
 )
 
 
+# ───────────── регистрация редактируемых промптов (админка может менять) ─────────────
+agent_config.register("soul", SOUL, "Душа — кто он", "Голос и характер высшего приоритета (SOUL.md).", "prompt", 1)
+agent_config.register("system_base", SYSTEM_BASE, "Характер, методы, правила", "Главный системный промпт психолога: инструментарий, голос, длина, запреты.", "prompt", 2)
+agent_config.register("anti_ai", ANTI_AI, "Анти-ИИ фильтр", "Подмешивается в портрет, итоги, настрой — чтобы звучали как живой человек.", "prompt", 3)
+agent_config.register("layer_order", "soul,system_base",
+                      "Порядок слоёв в промпте чата",
+                      "Через запятую. Перетасуй — меняешь хронологию подачи. Доступно: soul, system_base. Фильтр модели всегда идёт первым.",
+                      "order", 0)
+agent_config.register("chat_max_tokens", "150", "Лимит длины ответа в чате",
+                      "Сколько токенов максимум на реплику психолога. Меньше — короче.", "setting", 0)
+
+
 def user_system(compiled_profile: str, insights: str = "") -> list:
-    """Душа (SOUL.md) + универсальное ядро + персональный профиль + живые инсайты."""
+    """Душа + ядро + персональный профиль + живые инсайты. Порядок слоёв и тексты — из конфига."""
+    parts = {"soul": cfg("soul", SOUL), "system_base": cfg("system_base", SYSTEM_BASE)}
+    order = [x.strip() for x in str(cfg("layer_order", "soul,system_base")).split(",") if x.strip()]
     blocks = []
-    if SOUL:
-        blocks.append({"type": "text", "text": SOUL})
-    blocks.append({"type": "text", "text": SYSTEM_BASE})
+    used = set()
+    for name in order:
+        if name == "model_filter":
+            continue                       # фильтр модели вставляет llm.py (всегда первым)
+        t = parts.get(name)
+        if t and name not in used:
+            blocks.append({"type": "text", "text": t}); used.add(name)
+    for name in ("soul", "system_base"):   # на случай если в order чего-то нет
+        if name not in used and parts.get(name):
+            blocks.append({"type": "text", "text": parts[name]}); used.add(name)
     cp = (compiled_profile or "").strip()
     if cp:
         blocks.append({
