@@ -149,7 +149,8 @@ async function boot() {
 
 /* ───────── APP-LOCK: Face ID / код (локально, на устройстве) ───────── */
 const LOCK_PIN = "mood_lock_pin", LOCK_FACE = "mood_lock_face";
-const lockEnabled = () => { try { return !!localStorage.getItem(LOCK_PIN); } catch (_) { return false; } };
+const lockEnabled = () => { try { return !!(localStorage.getItem(LOCK_PIN) || localStorage.getItem(LOCK_FACE)); } catch (_) { return false; } };
+async function faceAvailable() { try { return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch (_) { return false; } }
 async function sha(s) {
   const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -195,8 +196,14 @@ async function lockComplete(pin) {
 function showLock(mode) {
   lockKeys(); lockBuf = ""; lockFirst = ""; lockMode = mode === "unlock" ? "unlock" : "set1";
   lockDots(); $("lockErr").hidden = true;
-  $("lockTitle").textContent = mode === "unlock" ? "введи код" : "придумай код";
-  const faceBtn = $("lockFace"), canFace = mode === "unlock" && !!localStorage.getItem(LOCK_FACE);
+  const pinSet = !!localStorage.getItem(LOCK_PIN), faceSet = !!localStorage.getItem(LOCK_FACE);
+  // при разблокировке клавиатура нужна только если код вообще задан
+  const showKeys = mode !== "unlock" || pinSet;
+  $("lockKeys").style.display = showKeys ? "grid" : "none";
+  $("lockDots").style.display = showKeys ? "flex" : "none";
+  $("lockTitle").textContent = mode !== "unlock" ? "придумай код"
+    : (pinSet ? "введи код" : "приложи Face ID");
+  const faceBtn = $("lockFace"), canFace = mode === "unlock" && faceSet;
   faceBtn.hidden = !canFace; faceBtn.onclick = () => faceUnlock(false);
   $("lockCancel").hidden = mode === "unlock";
   $("lockCancel").onclick = () => lockClose(false);
@@ -226,27 +233,34 @@ async function registerFace() {
   } catch (_) { return false; }
 }
 async function requireUnlock() {
-  if (localStorage.getItem(LOCK_FACE)) { if (await faceUnlock(true)) return true; }
-  return await showLock("unlock");
+  // Face ID по умолчанию — сразу, без выбора метода
+  if (localStorage.getItem(LOCK_FACE)) {
+    if (await faceUnlock(true)) return true;
+    if (await faceUnlock(true)) return true;   // вторая попытка
+  }
+  return await showLock("unlock");             // покажет Face-кнопку и/или код
 }
 function lockStateText() {
   const el = $("lockState"); if (!el) return;
   const pin = !!localStorage.getItem(LOCK_PIN), face = !!localStorage.getItem(LOCK_FACE);
-  el.textContent = !pin ? "выключена" : face ? "код + Face ID" : "код";
+  el.textContent = (!pin && !face) ? "выключена" : face ? (pin ? "Face ID + код" : "Face ID") : "код";
 }
 async function offerLockSetup() {
-  const ok = await showLock("set1");
-  if (!ok) return;
-  lockStateText();
-  if (window.PublicKeyCredential && confirm("Код установлен. Добавить вход по Face ID?")) {
-    if (await registerFace()) lockStateText();
-    else alert("Face ID недоступен на этом устройстве");
+  // Face ID — основной метод. Есть на устройстве — ставим его, код не спрашиваем.
+  if (await faceAvailable()) {
+    if (await registerFace()) { lockStateText(); return; }
+    // Face ID не получился → код как запасной
   }
+  const ok = await showLock("set1");
+  if (ok) lockStateText();
 }
 function maybeOfferLock() {
   if (lockEnabled()) return;
   try { if (localStorage.getItem("mood_lock_offered")) return; localStorage.setItem("mood_lock_offered", "1"); } catch (_) { return; }
-  setTimeout(() => { if (confirm("Защитить вход в MOOD? Можно поставить код или Face ID.")) offerLockSetup(); }, 900);
+  setTimeout(async () => {
+    const face = await faceAvailable();
+    if (confirm(face ? "Защитить вход по Face ID?" : "Защитить вход кодом?")) offerLockSetup();
+  }, 900);
 }
 function setupLockUI() {
   lockStateText();
@@ -1181,12 +1195,13 @@ function renderMood(s) {
   // из чего складывается оценка — наглядно, понятнее чем абстрактные «отметки»
   const comp = $("moodChart");
   if (comp) comp.innerHTML = moodComposition(s);
-  // тренд во времени — только когда реально накопились отметки
+  // тренд во времени — только когда есть РЕАЛЬНОЕ движение (не плоская линия)
   const tr = $("moodBars");
   if (tr) {
-    tr.innerHTML = hist.length >= 3
-      ? `<div class="mood-chart-cap">как менялось со временем</div>${sparkline(hist)}`
-      : chartLock(`тренд появится, когда отметишь настроение ещё ${Math.max(0, 3 - hist.length)} ${plural(Math.max(0, 3 - hist.length), "раз", "раза", "раз")} (в дневнике)`);
+    const sp = sparkline(hist);
+    tr.innerHTML = sp
+      ? `<div class="mood-chart-cap">как менялось со временем</div>${sp}`
+      : chartLock("тренд появится, когда настроение начнёт меняться — отмечай его в дневнике");
   }
 }
 
@@ -1214,9 +1229,10 @@ function moodComposition(s) {
 
 /* sparkline: SVG-полилиния по истории MOOD */
 function sparkline(hist) {
-  if (!hist || hist.length < 2) return "";
+  if (!hist || hist.length < 3) return "";
   const vals = hist.map((h) => h.score);
   const min = Math.min(...vals), max = Math.max(...vals);
+  if (max === min) return "";                 // плоская линия — не рисуем (бессмысленно)
   const span = max - min || 1;
   const W = 280, H = 56, pad = 4;
   const n = vals.length;
@@ -1267,13 +1283,12 @@ function renderAnalytics(s) {
   }
   const stat = (k, v) => `<div class="stat-tile"><div class="stat-v">${v}</div><div class="stat-k">${k}</div></div>`;
   const streak = s.streak || 0;
-  const spark = sparkline(s.mood_history);
   box.innerHTML = `<div class="stat-grid">
     ${stat("сеансов", s.sessions)}
     ${stat("сообщений", s.user_msgs)}
     ${stat("дней подряд", streak > 0 ? `<span class="stat-flame">${ico("flame")}</span> ` + streak : "—")}
     ${stat("MOOD", s.mood != null ? s.mood : "—")}
-  </div>${spark ? `<div class="spark-wrap"><div class="spark-cap">динамика MOOD</div>${spark}</div>` : ""}`;
+  </div>`;
 }
 
 function plural(n, a, b, c) {

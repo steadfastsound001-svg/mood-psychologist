@@ -636,6 +636,16 @@ canvas { display: block; max-width: 100%; }
 }
 .chat-view[hidden] { display: none; }
 
+/* профиль и дневник — тоже fixed со своим скроллом (как чат), чтобы свайп не прыгал */
+.profile-view, .diary-view {
+  position: fixed; top: 0; left: 0; right: 0;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-left)) 24px max(16px, env(safe-area-inset-right));
+  z-index: 50;
+}
+.profile-view[hidden], .diary-view[hidden] { display: none; }
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
