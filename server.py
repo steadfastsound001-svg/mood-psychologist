@@ -392,6 +392,16 @@ class Handler(BaseHTTPRequestHandler):
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": text})
         model = (body.get("model") or "").strip() or None   # A/B: прогон через конкретную модель
+        ov = body.get("overrides")                           # тумблеры песочницы: {key: "" = выкл, или новое значение}
+        if isinstance(ov, dict):
+            agent_config.set_overrides(ov)
+        else:
+            agent_config.clear_overrides()
+        try:
+            sys_blocks = user_system(prof.get("compiled", ""), insights)
+            max_tok = agent_config.cfg_int("chat_max_tokens", 150)
+        except Exception:
+            sys_blocks, max_tok = user_system(prof.get("compiled", ""), insights), 150
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -400,8 +410,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             for delta in stream_completion_sync(
-                system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 150),
+                system=sys_blocks, messages=messages, max_tokens=max_tok,
                 task="dialog", model=model,
             ):
                 try:
@@ -413,6 +422,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"\n[сломалось: {e}]".encode("utf-8"))
             except Exception:
                 pass
+        finally:
+            agent_config.clear_overrides()                   # не течёт на следующие запросы
 
     def _transcribe(self):
         """Распознаёт голос (сырые байты аудио) через Groq Whisper → {"text": ...}."""

@@ -5,6 +5,7 @@
 возвращает override из БД, иначе дефолт из кода. Кэш 15с — правки подхватываются
 почти сразу, без удара по БД на каждый промпт.
 """
+import threading
 import time
 import store
 
@@ -12,6 +13,22 @@ _REG: dict[str, dict] = {}      # key -> {default, label, desc, cat, order}
 _cache: dict[str, str] = {}
 _cache_at = 0.0
 _TTL = 15.0
+
+# per-call оверрайды (песочница техпанели): на время запроса подменяют любой ключ,
+# в т.ч. пустой строкой = «слой выключен». thread-local → не течёт между запросами.
+_TLS = threading.local()
+
+
+def set_overrides(d):
+    _TLS.ov = {str(k): ("" if v is None else str(v)) for k, v in (d or {}).items()}
+
+
+def clear_overrides():
+    _TLS.ov = None
+
+
+def _call_ov():
+    return getattr(_TLS, "ov", None)
 
 
 def register(key, default, label="", desc="", cat="prompt", order=0):
@@ -30,7 +47,10 @@ def _overrides() -> dict:
 
 
 def cfg(key, default=None):
-    """Эффективное значение: override из БД (если непустой) → дефолт из реестра → переданный default."""
+    """Эффективное значение: per-call override (песочница) → override из БД → дефолт реестра → default."""
+    co = _call_ov()
+    if co is not None and key in co:
+        return co[key]                 # "" = слой выключен на этот запрос
     ov = _overrides().get(key)
     if ov:
         return ov

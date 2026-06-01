@@ -73,6 +73,19 @@
   .cfg-btn.ghost{ background:transparent; color:var(--hint); border:1px solid var(--line); font-weight:400; }
   .cfg-flash{ color:var(--good); font-size:12px; }
   .cfg-flash.bad{ color:var(--bad); }
+  /* полировка */
+  .card2{ transition:border-color .2s; }
+  .card2 h2{ letter-spacing:.2px; }
+  .tab{ transition:color .15s, border-color .15s, background .15s; }
+  .tab:hover{ color:var(--text); }
+  .cfg-btn{ transition:filter .15s, transform .1s; }
+  .cfg-btn:hover{ filter:brightness(1.08); }
+  .cfg-btn:active{ transform:scale(.96); }
+  .mr-tile{ transition:border-color .2s; }
+  .mr-tile:hover{ border-color:var(--accent); }
+  details.sec2>summary:hover{ color:var(--accent); }
+  .tc-sel,.cfg-input,.cfg-area,.tc-len{ transition:border-color .15s; }
+  .tc-sel:focus,.cfg-input:focus,.cfg-area:focus,.tc-len:focus{ outline:none; border-color:var(--accent); }
   .tc-log{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px; min-height:140px; max-height:400px; overflow:auto; margin-bottom:10px; display:flex; flex-direction:column; gap:6px; }
   .tc-log:empty:before{ content:"пусто — напиши и проверь характер"; color:var(--hint); font-size:13px; }
   .tc-log .msg{ max-width:82%; margin:0; }
@@ -104,6 +117,11 @@
   .tc-col .h{ font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.4px; margin-bottom:5px; }
   .tc-col .msg{ max-width:100%; }
   .cfg-pre{ margin-bottom:8px; }
+  /* тумблеры слоёв промпта в песочнице */
+  .tc-settings{ display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px; padding:11px 14px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; }
+  .tc-settings label.tc-check{ color:var(--text); }
+  .tc-settings input[type=checkbox]{ accent-color:var(--accent); width:15px; height:15px; }
+  .tc-len{ width:62px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font:13px inherit; }
 </style>
 </head>
 <body>
@@ -281,6 +299,8 @@ const MODEL_PRESETS=[
   ["","— текущий стек —"],
   ["google/gemini-3-flash-preview","Gemini 3 Flash · быстрый"],
   ["google/gemini-3.1-pro-preview","Gemini 3.1 Pro · глубокий (think)"],
+  ["anthropic/claude-sonnet-4.6","Claude Sonnet 4.6"],
+  ["gpt-5","GPT-5 · OpenAI (think)"],
   ["deepseek/deepseek-v4-pro","DeepSeek V4 Pro · think"],
   ["deepseek/deepseek-chat-v3.1","DeepSeek V3.1 · быстрый"],
   ["openai/gpt-oss-120b:free","gpt-oss 120B · free"],
@@ -320,7 +340,6 @@ function cfgEditor(it){
   const multiline = it.cat==="prompt"||it.cat==="filter";
   const field = multiline ? el("textarea",{class:"cfg-area"}) : el("input",{class:"cfg-input"});
   field.value = it.overridden ? it.value : it.default;     // пустой override не подменяем дефолтом
-  if(it.cat==="model"){ const pre=modelSelect(field.value, v=>{ if(v) field.value=v; }); pre.classList.add("cfg-pre"); box.append(pre); }
   box.append(field);
   const act=el("div",{class:"cfg-act"});
   const save=el("button",{class:"cfg-btn",text:"сохранить"});
@@ -337,26 +356,48 @@ function cfgEditor(it){
   box.append(act);
   return box;
 }
+/* редактор модели: дропдаун пресетов + «другая…» (raw-поле только при custom). сохранение в 1 клик. */
+function modelRow(it){
+  const box=el("div",{class:"cfg"});
+  const head=el("div",{class:"cfg-h"}, el("b",{text:it.label}), it.overridden?el("span",{class:"pill on",text:"изменён"}):null);
+  box.append(head);
+  const cur=it.overridden?it.value:it.default;
+  const known=MODEL_PRESETS.some(p=>p[0]&&p[0]===cur);
+  const sel=el("select",{class:"tc-sel"});
+  MODEL_PRESETS.filter(p=>p[0]).forEach(([v,l])=>{ const o=el("option",{value:v,text:l}); if(v===cur)o.setAttribute("selected",""); sel.append(o); });
+  sel.append(el("option",{value:"__other",text:"другая модель…"}));
+  const raw=el("input",{class:"cfg-input",placeholder:"провайдер/модель, напр. google/gemini-3-flash-preview"});
+  raw.value=cur; raw.style.marginTop="8px"; raw.hidden=known; if(!known) sel.value="__other";
+  sel.onchange=()=>{ if(sel.value==="__other"){ raw.hidden=false; raw.focus(); } else { raw.hidden=true; raw.value=sel.value; } };
+  const act=el("div",{class:"cfg-act"});
+  const save=el("button",{class:"cfg-btn",text:"сохранить"});
+  save.onclick=async()=>{ const val=sel.value==="__other"?raw.value.trim():sel.value; if(!val) return; save.textContent="…"; try{ await apiPost("/api/admin/config",{key:it.key,value:val}); flash(box,"сохранено · применится за ~15 сек ✓"); }catch(e){ flash(box,"ошибка: "+e.message,true);} save.textContent="сохранить"; };
+  const rst=el("button",{class:"cfg-btn ghost",text:"вернуть как было"});
+  rst.onclick=async()=>{ try{ await apiPost("/api/admin/config",{key:it.key,reset:true}); flash(box,"сброшено к дефолту"); }catch(e){ flash(box,"ошибка",true);} };
+  act.append(save,rst);
+  box.append(sel, raw, act);
+  return box;
+}
 function modelsCard(items){
   const m=items.filter(i=>i.cat==="model");
   const gv=(k)=>{ const it=m.find(x=>x.key===k); return it?(it.overridden?it.value:it.default):"—"; };
   const card=el("div",{class:"card2"});
   card.append(el("h2",{text:"модели в стеке"}));
-  card.append(el("div",{class:"lead",text:"маршрут по задачам. имя с «/» = через OpenRouter (Gemini, DeepSeek…), без «/» = нативный OpenAI. правка применяется за ~15 сек, без деплоя."}));
+  card.append(el("div",{class:"lead",text:"что какой моделью считается. имя с «/» = через OpenRouter, без «/» = нативный OpenAI. меняешь дропдауном → сохранить → применится за ~15 сек, без деплоя."}));
   card.append(el("div",{class:"model-route"},
     mrTile("чат · дневник · фон", gv("model_chat"), "быстро, без reasoning"),
     mrTile("портрет · итоги · /ask", gv("model_deep"), "глубоко, можно think"),
     mrTile("если упало", "free-цепочка", "qwen → gpt-oss → llama → deepseek, авто")
   ));
-  m.forEach(it=>card.append(cfgEditor(it)));
+  m.forEach(it=>card.append(modelRow(it)));
   return card;
 }
 /* песочница: тот же характер+промпты, без записи. A/B — один вопрос двум моделям рядом. */
-function streamInto(node,q,hist,model,log){
+function streamInto(node,q,hist,model,log,overrides){
   return new Promise(async(resolve)=>{
     node.textContent="…";
     try{
-      const res=await fetch("/api/admin/test-chat",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({q,history:hist,model:model||""})});
+      const res=await fetch("/api/admin/test-chat",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({q,history:hist,model:model||"",overrides:overrides||{}})});
       if(!res.ok||!res.body){ node.textContent="ошибка "+res.status; return resolve(""); }
       const rd=res.body.getReader(),dec=new TextDecoder(); let acc=""; node.textContent="";
       while(true){ const {value,done}=await rd.read(); if(done)break; acc+=dec.decode(value,{stream:true}); node.textContent=acc; if(log)log.scrollTop=log.scrollHeight; }
@@ -364,16 +405,34 @@ function streamInto(node,q,hist,model,log){
     }catch(e){ node.textContent="сорвалось: "+e.message; resolve(""); }
   });
 }
-function testChat(){
+function testChat(items){
   const card=el("div",{class:"card2"});
   card.append(el("h2",{text:"песочница · A/B"}));
-  card.append(el("div",{class:"lead",text:"на твоём реальном характере и текущих промптах. НЕ сохраняется. поменял промпт/модель — проверь сразу. A/B: один вопрос двум моделям рядом."}));
+  card.append(el("div",{class:"lead",text:"твой реальный характер и текущие промпты. НЕ сохраняется. тумблеры ниже влияют ТОЛЬКО на песочницу и мгновенно — щёлкнул, отправил, услышал разницу. A/B: один вопрос двум моделям рядом."}));
   let modelA="", modelB="google/gemini-3.1-pro-preview", ab=false;
   const selA=modelSelect(modelA, v=>modelA=v);
   const selB=modelSelect(modelB, v=>modelB=v); selB.disabled=true;
-  const chk=el("input",{type:"checkbox"});
-  chk.onchange=()=>{ ab=chk.checked; selB.disabled=!ab; };
+  const chk=el("input",{type:"checkbox"}); chk.onchange=()=>{ ab=chk.checked; selB.disabled=!ab; };
   const bar=el("div",{class:"tc-bar"}, el("span",{class:"muted small",text:"модель:"}), selA, el("label",{class:"tc-check"}, chk, "A/B c"), selB);
+  // тумблеры слоёв промпта (мгновенные per-call оверрайды, без сохранения)
+  const tog={ soul:true, system_base:true, filter:true };
+  const filterKeys=items.filter(i=>i.cat==="filter").map(i=>i.key);
+  const lenItem=items.find(i=>i.key==="chat_max_tokens");
+  const lenDef=lenItem?(lenItem.overridden?lenItem.value:lenItem.default):"150";
+  const mkTog=(key,label)=>{ const c=el("input",{type:"checkbox"}); c.checked=true; c.onchange=()=>tog[key]=c.checked; return el("label",{class:"tc-check"}, c, label); };
+  const lenInp=el("input",{class:"tc-len",type:"number",min:"30",max:"800"}); lenInp.value=lenDef;
+  const settings=el("div",{class:"tc-settings"},
+    el("span",{class:"muted small",text:"в промпте:"}),
+    mkTog("soul","душа"), mkTog("system_base","характер+правила"), mkTog("filter","анти-ИИ фильтр"),
+    el("span",{class:"muted small",style:"margin-left:auto"},"длина ↦"), lenInp);
+  function overrides(){
+    const o={};
+    if(!tog.soul) o.soul="";
+    if(!tog.system_base) o.system_base="";
+    if(!tog.filter) filterKeys.forEach(k=>o[k]="");
+    const L=parseInt(lenInp.value,10); if(L>0) o.chat_max_tokens=String(L);
+    return o;
+  }
   const log=el("div",{class:"tc-log"});
   const inp=el("textarea",{class:"cfg-area tc-inp",rows:"2",placeholder:"вопрос психологу…"});
   const send=el("button",{class:"cfg-btn",text:"отправить"});
@@ -383,23 +442,24 @@ function testChat(){
   async function go(){
     const q=inp.value.trim(); if(!q||busy) return;
     busy=true; send.disabled=true; inp.value="";
+    const ov=overrides();
     log.append(el("div",{class:"msg user"}, el("div",{class:"r",text:"ты"}), q));
     let aText="";
     if(!ab){
       const ans=el("div",{class:"msg assistant"}, el("div",{class:"r",text:modelLabel(modelA)})); const t=document.createTextNode(""); ans.append(t); log.append(ans); log.scrollTop=log.scrollHeight;
-      aText=await streamInto(t,q,hist,modelA,log);
+      aText=await streamInto(t,q,hist,modelA,log,ov);
     } else {
       const colA=el("div",{class:"tc-col"}, el("div",{class:"h",text:modelLabel(modelA)})); const tA=document.createTextNode(""); colA.append(el("div",{class:"msg assistant"},tA));
       const colB=el("div",{class:"tc-col"}, el("div",{class:"h",text:modelLabel(modelB)})); const tB=document.createTextNode(""); colB.append(el("div",{class:"msg assistant"},tB));
       log.append(el("div",{class:"tc-cols"}, colA, colB)); log.scrollTop=log.scrollHeight;
-      const r=await Promise.all([streamInto(tA,q,hist,modelA,log), streamInto(tB,q,hist,modelB,log)]); aText=r[0];
+      const r=await Promise.all([streamInto(tA,q,hist,modelA,log,ov), streamInto(tB,q,hist,modelB,log,ov)]); aText=r[0];
     }
     hist.push({role:"user",content:q}); hist.push({role:"assistant",content:aText}); if(hist.length>20) hist.splice(0,hist.length-20);
     log.scrollTop=log.scrollHeight; busy=false; send.disabled=false; inp.focus();
   }
   send.onclick=go;
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); go(); }});
-  card.append(bar, log, el("div",{class:"tc-row"}, inp, send), el("div",{style:"margin-top:8px"}, clr));
+  card.append(bar, settings, log, el("div",{class:"tc-row"}, inp, send), el("div",{style:"margin-top:8px"}, clr));
   return card;
 }
 async function renderTech(){
@@ -411,7 +471,7 @@ async function renderTech(){
   clear(c);
   const items=data.items||[];
   c.append(modelsCard(items));          // 1. модели (открыто)
-  c.append(testChat());                 // 2. песочница + A/B (открыто)
+  c.append(testChat(items));            // 2. песочница + A/B + тумблеры (открыто)
   const group=(cats, lead)=>{
     const list=items.filter(i=>cats.includes(i.cat)); if(!list.length) return null;
     const b=el("div"); if(lead) b.append(el("div",{class:"lead",text:lead}));
