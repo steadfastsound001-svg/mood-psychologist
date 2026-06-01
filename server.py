@@ -391,6 +391,7 @@ class Handler(BaseHTTPRequestHandler):
             if content:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": text})
+        model = (body.get("model") or "").strip() or None   # A/B: прогон через конкретную модель
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -400,7 +401,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             for delta in stream_completion_sync(
                 system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 150), task="dialog",
+                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 150),
+                task="dialog", model=model,
             ):
                 try:
                     self.wfile.write(delta.encode("utf-8")); self.wfile.flush()

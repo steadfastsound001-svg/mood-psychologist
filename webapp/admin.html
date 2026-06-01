@@ -81,6 +81,29 @@
   .tc-row{ display:flex; gap:8px; align-items:flex-end; }
   .tc-inp{ flex:1; min-height:46px; max-height:120px; }
   .tc-clear{ background:transparent; color:var(--hint); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; font:inherit; font-size:12px; }
+  /* collapsible-секции (минимализм: открыто только нужное) */
+  details.sec2{ border:1px solid var(--line); border-radius:14px; margin-bottom:12px; background:var(--panel); overflow:hidden; }
+  details.sec2>summary{ list-style:none; cursor:pointer; padding:15px 20px; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:space-between; }
+  details.sec2>summary::-webkit-details-marker{ display:none; }
+  details.sec2>summary::after{ content:"▾"; color:var(--hint); transition:transform .2s; }
+  details.sec2[open]>summary::after{ transform:rotate(180deg); }
+  .sec2-body{ padding:2px 20px 18px; }
+  /* модели: плитки маршрута */
+  .model-route{ display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  .mr-tile{ flex:1; min-width:150px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:11px 13px; }
+  .mr-tile .h{ color:var(--accent); font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+  .mr-tile .m{ font-family:ui-monospace,Menlo,monospace; font-size:12px; margin-top:4px; word-break:break-all; color:var(--text); }
+  .mr-tile .d{ color:var(--hint); font-size:11px; margin-top:4px; }
+  /* песочница / A/B */
+  .tc-bar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .tc-sel{ background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font:13px inherit; max-width:240px; }
+  .tc-sel:disabled{ opacity:.4; }
+  label.tc-check{ display:flex; align-items:center; gap:6px; color:var(--hint); font-size:12px; cursor:pointer; }
+  .tc-cols{ display:flex; gap:10px; }
+  .tc-col{ flex:1; min-width:0; }
+  .tc-col .h{ font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.4px; margin-bottom:5px; }
+  .tc-col .msg{ max-width:100%; }
+  .cfg-pre{ margin-bottom:8px; }
 </style>
 </head>
 <body>
@@ -239,7 +262,7 @@ function renderHow(){
     ),
     card("Движки и защита", null,
       pipe([
-        ["Сейчас работает","gpt-5 (диалог, портрет) и gpt-5-mini (фон). Если платный движок упал — автоматически встают бесплатные, без остановки."],
+        ["Сейчас работает","Gemini 3 Flash (чат, дневник, фон) и Gemini 3.1 Pro (портрет, итоги, /ask) — через OpenRouter. Если упал — автоматически встают бесплатные модели, без остановки. Модели меняются во вкладке «техника»."],
         ["Защита входа","Face ID или 4-значный код. Хранится только на твоём устройстве."]
       ])
     )
@@ -253,19 +276,41 @@ async function apiPost(path, body){
   if(!r.ok) throw Object.assign(new Error("HTTP "+r.status),{status:r.status});
   return r.json();
 }
-const CAT_TITLE={order:"порядок слоёв промпта",setting:"настройки",prompt:"промпты (на всех этапах)",filter:"фильтры под модель"};
-function dbInfo(){
+const CAT_TITLE={model:"модели в стеке",prompt:"промпты — на всех этапах",filter:"фильтры под модель",order:"порядок слоёв",setting:"настройки"};
+const MODEL_PRESETS=[
+  ["","— текущий стек —"],
+  ["google/gemini-3-flash-preview","Gemini 3 Flash · быстрый"],
+  ["google/gemini-3.1-pro-preview","Gemini 3.1 Pro · глубокий (think)"],
+  ["deepseek/deepseek-v4-pro","DeepSeek V4 Pro · think"],
+  ["deepseek/deepseek-chat-v3.1","DeepSeek V3.1 · быстрый"],
+  ["openai/gpt-oss-120b:free","gpt-oss 120B · free"],
+];
+const modelLabel=(m)=>{ const p=MODEL_PRESETS.find(x=>x[0]===m); return p?p[1]:(m||"текущий стек"); };
+function details(title, open, ...body){
+  const d=el("details",{class:"sec2"}); if(open) d.setAttribute("open","");
+  d.append(el("summary",{text:title}));
+  const b=el("div",{class:"sec2-body"}); body.forEach(x=>x&&b.append(x)); d.append(b);
+  return d;
+}
+function modelSelect(val, onPick){
+  const s=el("select",{class:"tc-sel"});
+  MODEL_PRESETS.forEach(([v,l])=>{ const o=el("option",{value:v,text:l}); if(v===val)o.setAttribute("selected",""); s.append(o); });
+  if(onPick) s.onchange=()=>onPick(s.value);
+  return s;
+}
+function mrTile(h,m,d){ return el("div",{class:"mr-tile"}, el("div",{class:"h",text:h}), el("div",{class:"m",text:m}), el("div",{class:"d",text:d})); }
+function dbInfoBody(){
   const rows=[
-    ["профиль","portrait (что видит клиент), ответы тестов, инсайты «что узнал», настрой за 10 дней"],
-    ["переписка","все сообщения чата (одна база на TG и приложение)"],
+    ["профиль","портрет (что видит клиент), ответы тестов, инсайты «что узнал», настрой за 10 дней"],
+    ["переписка","все сообщения чата — одна база на Telegram и приложение"],
     ["дневник","записи + короткие отклики психолога"],
-    ["отметки настроения","для графика динамики MOOD"],
+    ["отметки настроения","ежедневный пульс для оценки MOOD"],
     ["досье","загруженные тобой файлы про себя"],
     ["лайки портрета","твои отзывы — агент учится писать портрет точнее"],
-    ["конфиг агента","эти самые промпты и настройки (редактируются ниже)"],
+    ["конфиг агента","модели, промпты, фильтры, настройки (редактируются здесь)"],
   ];
   const ul=el("ul",{class:"pipe"}); rows.forEach(([a,b])=>ul.append(el("li",null,el("b",{text:a})," — "+b)));
-  return card("Базы данных в работе","Что и где хранится про тебя.",ul);
+  return ul;
 }
 function flash(box,msg,bad){ const f=el("span",{class:"cfg-flash"+(bad?" bad":""),text:msg}); box.append(f); setTimeout(()=>f.remove(),1800); }
 function cfgEditor(it){
@@ -274,7 +319,8 @@ function cfgEditor(it){
   if(it.desc) box.append(el("div",{class:"cfg-d",text:it.desc}));
   const multiline = it.cat==="prompt"||it.cat==="filter";
   const field = multiline ? el("textarea",{class:"cfg-area"}) : el("input",{class:"cfg-input"});
-  field.value = it.value || it.default;
+  field.value = it.overridden ? it.value : it.default;     // пустой override не подменяем дефолтом
+  if(it.cat==="model"){ const pre=modelSelect(field.value, v=>{ if(v) field.value=v; }); pre.classList.add("cfg-pre"); box.append(pre); }
   box.append(field);
   const act=el("div",{class:"cfg-act"});
   const save=el("button",{class:"cfg-btn",text:"сохранить"});
@@ -291,38 +337,69 @@ function cfgEditor(it){
   box.append(act);
   return box;
 }
-/* живой чат с психологом прямо в техпанели — на текущих промптах, без записи в историю */
+function modelsCard(items){
+  const m=items.filter(i=>i.cat==="model");
+  const gv=(k)=>{ const it=m.find(x=>x.key===k); return it?(it.overridden?it.value:it.default):"—"; };
+  const card=el("div",{class:"card2"});
+  card.append(el("h2",{text:"модели в стеке"}));
+  card.append(el("div",{class:"lead",text:"маршрут по задачам. имя с «/» = через OpenRouter (Gemini, DeepSeek…), без «/» = нативный OpenAI. правка применяется за ~15 сек, без деплоя."}));
+  card.append(el("div",{class:"model-route"},
+    mrTile("чат · дневник · фон", gv("model_chat"), "быстро, без reasoning"),
+    mrTile("портрет · итоги · /ask", gv("model_deep"), "глубоко, можно think"),
+    mrTile("если упало", "free-цепочка", "qwen → gpt-oss → llama → deepseek, авто")
+  ));
+  m.forEach(it=>card.append(cfgEditor(it)));
+  return card;
+}
+/* песочница: тот же характер+промпты, без записи. A/B — один вопрос двум моделям рядом. */
+function streamInto(node,q,hist,model,log){
+  return new Promise(async(resolve)=>{
+    node.textContent="…";
+    try{
+      const res=await fetch("/api/admin/test-chat",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({q,history:hist,model:model||""})});
+      if(!res.ok||!res.body){ node.textContent="ошибка "+res.status; return resolve(""); }
+      const rd=res.body.getReader(),dec=new TextDecoder(); let acc=""; node.textContent="";
+      while(true){ const {value,done}=await rd.read(); if(done)break; acc+=dec.decode(value,{stream:true}); node.textContent=acc; if(log)log.scrollTop=log.scrollHeight; }
+      resolve(acc);
+    }catch(e){ node.textContent="сорвалось: "+e.message; resolve(""); }
+  });
+}
 function testChat(){
   const card=el("div",{class:"card2"});
-  card.append(el("h2",{text:"чат с психологом — проверь настройки"}));
-  card.append(el("div",{class:"lead",text:"отвечает на твоём реальном характере и текущих промптах выше. сообщения НЕ сохраняются — чистая песочница. поменял промпт → отправь и сразу слышишь разницу."}));
+  card.append(el("h2",{text:"песочница · A/B"}));
+  card.append(el("div",{class:"lead",text:"на твоём реальном характере и текущих промптах. НЕ сохраняется. поменял промпт/модель — проверь сразу. A/B: один вопрос двум моделям рядом."}));
+  let modelA="", modelB="google/gemini-3.1-pro-preview", ab=false;
+  const selA=modelSelect(modelA, v=>modelA=v);
+  const selB=modelSelect(modelB, v=>modelB=v); selB.disabled=true;
+  const chk=el("input",{type:"checkbox"});
+  chk.onchange=()=>{ ab=chk.checked; selB.disabled=!ab; };
+  const bar=el("div",{class:"tc-bar"}, el("span",{class:"muted small",text:"модель:"}), selA, el("label",{class:"tc-check"}, chk, "A/B c"), selB);
   const log=el("div",{class:"tc-log"});
-  const inp=el("textarea",{class:"cfg-area tc-inp",rows:"2",placeholder:"напиши сообщение…"});
+  const inp=el("textarea",{class:"cfg-area tc-inp",rows:"2",placeholder:"вопрос психологу…"});
   const send=el("button",{class:"cfg-btn",text:"отправить"});
   const clr=el("button",{class:"tc-clear",text:"очистить"});
-  const hist=[];
-  let busy=false;
+  const hist=[]; let busy=false;
   clr.onclick=()=>{ hist.length=0; clear(log); };
   async function go(){
     const q=inp.value.trim(); if(!q||busy) return;
     busy=true; send.disabled=true; inp.value="";
     log.append(el("div",{class:"msg user"}, el("div",{class:"r",text:"ты"}), q));
-    const ans=el("div",{class:"msg assistant"}, el("div",{class:"r",text:"психолог"}));
-    const txt=document.createTextNode("…"); ans.append(txt); log.append(ans); log.scrollTop=log.scrollHeight;
-    try{
-      const res=await fetch("/api/admin/test-chat",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({q,history:hist})});
-      if(!res.ok||!res.body){ txt.textContent="ошибка "+res.status; busy=false; send.disabled=false; return; }
-      const rd=res.body.getReader(), dec=new TextDecoder(); let acc="";
-      txt.textContent="";
-      while(true){ const {value,done}=await rd.read(); if(done) break; acc+=dec.decode(value,{stream:true}); txt.textContent=acc; log.scrollTop=log.scrollHeight; }
-      hist.push({role:"user",content:q}); hist.push({role:"assistant",content:acc});
-      if(hist.length>20) hist.splice(0,hist.length-20);
-    }catch(e){ txt.textContent="сорвалось: "+e.message; }
-    busy=false; send.disabled=false; inp.focus();
+    let aText="";
+    if(!ab){
+      const ans=el("div",{class:"msg assistant"}, el("div",{class:"r",text:modelLabel(modelA)})); const t=document.createTextNode(""); ans.append(t); log.append(ans); log.scrollTop=log.scrollHeight;
+      aText=await streamInto(t,q,hist,modelA,log);
+    } else {
+      const colA=el("div",{class:"tc-col"}, el("div",{class:"h",text:modelLabel(modelA)})); const tA=document.createTextNode(""); colA.append(el("div",{class:"msg assistant"},tA));
+      const colB=el("div",{class:"tc-col"}, el("div",{class:"h",text:modelLabel(modelB)})); const tB=document.createTextNode(""); colB.append(el("div",{class:"msg assistant"},tB));
+      log.append(el("div",{class:"tc-cols"}, colA, colB)); log.scrollTop=log.scrollHeight;
+      const r=await Promise.all([streamInto(tA,q,hist,modelA,log), streamInto(tB,q,hist,modelB,log)]); aText=r[0];
+    }
+    hist.push({role:"user",content:q}); hist.push({role:"assistant",content:aText}); if(hist.length>20) hist.splice(0,hist.length-20);
+    log.scrollTop=log.scrollHeight; busy=false; send.disabled=false; inp.focus();
   }
   send.onclick=go;
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); go(); }});
-  card.append(log, el("div",{class:"tc-row"}, inp, send), el("div",{style:"margin-top:8px"}, clr));
+  card.append(bar, log, el("div",{class:"tc-row"}, inp, send), el("div",{style:"margin-top:8px"}, clr));
   return card;
 }
 async function renderTech(){
@@ -331,16 +408,20 @@ async function renderTech(){
   let data;
   try{ data=await api("/api/admin/config"); }
   catch(e){ showErr(e.status===403?"доступ только для владельца":"ошибка: "+e.message); return; }
-  clear(c); c.append(dbInfo());
+  clear(c);
   const items=data.items||[];
-  ["order","setting","filter","prompt"].forEach(cat=>{
-    const list=items.filter(i=>i.cat===cat); if(!list.length) return;
-    const wrap=el("div",{class:"card2"}, el("h2",{text:CAT_TITLE[cat]||cat}));
-    if(cat==="order") wrap.append(el("div",{class:"lead",text:"фильтр модели всегда идёт первым. дальше — в этом порядке. перетасуй — меняешь хронологию подачи агенту."}));
-    list.forEach(it=>wrap.append(cfgEditor(it)));
-    c.append(wrap);
-  });
-  c.append(testChat());
+  c.append(modelsCard(items));          // 1. модели (открыто)
+  c.append(testChat());                 // 2. песочница + A/B (открыто)
+  const group=(cats, lead)=>{
+    const list=items.filter(i=>cats.includes(i.cat)); if(!list.length) return null;
+    const b=el("div"); if(lead) b.append(el("div",{class:"lead",text:lead}));
+    list.forEach(it=>b.append(cfgEditor(it)));
+    return b;
+  };
+  const proms=group(["prompt"]); if(proms) c.append(details("промпты — на всех этапах",false,proms));
+  const fils=group(["filter"]); if(fils) c.append(details("фильтры под модель",false,fils));
+  const os=group(["order","setting"],"фильтр модели всегда первым, дальше — как тут. перетасуй блоки — меняешь хронологию подачи."); if(os) c.append(details("порядок слоёв · настройки",false,os));
+  c.append(details("базы данных — что хранится про тебя",false,dbInfoBody()));
 }
 
 function buildTabs(){
