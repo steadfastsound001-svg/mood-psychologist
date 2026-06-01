@@ -464,7 +464,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": blob}],
-                max_tokens=400, task="reasoning",
+                max_tokens=1000, task="reasoning",   # Pro: forced-reasoning ест часть бюджета
             )
             return resp.content[0].text.strip()
         except Exception as e:

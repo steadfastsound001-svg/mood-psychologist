@@ -49,8 +49,11 @@ def _openai_model_fast() -> str:
 def _openai_model_for_task(task: str | None) -> str | None:
     if not _openai_key():
         return None
-    fast_tasks = {"fast", "consolidate"}
-    return _openai_model_fast() if task in fast_tasks else _openai_model()
+    # глубокие задачи → «умная» модель (OPENAI_MODEL, напр. Gemini 3.1 Pro):
+    # портрет (analysis), итоги недели (reasoning), /ask (deep).
+    # чат и фон → быстрая (OPENAI_MODEL_FAST, напр. Gemini 3 Flash).
+    deep_tasks = {"analysis", "reasoning", "deep"}
+    return _openai_model() if task in deep_tasks else _openai_model_fast()
 
 
 # Specialist routing: разные модели под разные задачи.
@@ -96,17 +99,28 @@ _FILTER_LLAMA = (
     "[анти-почерк Llama]\n"
     "Llama тянет в дисклеймеры и хедж. ГАСИ: без оговорок «я всего лишь ИИ», без лишних предупреждений, прямо и по делу."
 )
+_FILTER_GEMINI = (
+    "[анти-почерк модели Gemini — соблюдай строго]\n"
+    "Gemini тянет в структуру, симметрию и мягкую угодливость. ГАСИ:\n"
+    "— без списков, заголовков, буллетов и «с одной стороны… с другой»: одна живая мысль, сплошной речью.\n"
+    "— ноль валидации и поддакивания («понимаю тебя», «это нормально», «ты молодец», «хороший вопрос»). не сглаживай ради комфорта.\n"
+    "— человек неправ — скажи прямо и мягко, не виляй (devil's advocate). честность важнее приятности.\n"
+    "— под нож Gemini-маркеры: «Важно понимать/отметить», «Стоит помнить», дежурные дисклеймеры, длинные преамбулы, концовка-резюме, тире-вставки, обилие **жирноты**.\n"
+    "— без морали и коуч-лозунгов. суше, короче, по-человечески."
+)
 import agent_config
 agent_config.register("filter_gpt", _FILTER_GPT, "Фильтр модели: GPT", "Глушит подхалимаж и почерк GPT. Включается на gpt-* и gpt-oss.", "filter", 1)
 agent_config.register("filter_deepseek", _FILTER_DEEPSEEK, "Фильтр модели: DeepSeek", "Глушит многословие DeepSeek.", "filter", 2)
 agent_config.register("filter_qwen", _FILTER_QWEN, "Фильтр модели: Qwen", "Глушит вежливость/кальку Qwen.", "filter", 3)
 agent_config.register("filter_llama", _FILTER_LLAMA, "Фильтр модели: Llama", "Глушит дисклеймеры Llama.", "filter", 4)
+agent_config.register("filter_gemini", _FILTER_GEMINI, "Фильтр модели: Gemini", "Глушит структуру/угодливость Gemini. Включается на gemini/google.", "filter", 5)
 
 # (подстрока в имени модели) -> ключ конфига фильтра. порядок: специфичное раньше общего.
 _FILTER_KEYS = [
     ("gpt-5", "filter_gpt"), ("gpt-4", "filter_gpt"), ("gpt-oss", "filter_gpt"),
+    ("gemini", "filter_gemini"),
     ("deepseek", "filter_deepseek"), ("qwen", "filter_qwen"), ("llama", "filter_llama"),
-    ("openai/", "filter_gpt"),
+    ("google/", "filter_gemini"), ("openai/", "filter_gpt"),
 ]
 
 
