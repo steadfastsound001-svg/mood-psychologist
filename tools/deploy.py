@@ -49,7 +49,9 @@ def main():
     key, srv = env.get("RENDER_API_KEY"), env.get("RENDER_SERVICE_ID")
     if not key or not srv:
         print("нет RENDER_API_KEY / RENDER_SERVICE_ID в .env"); sys.exit(1)
-    st, d = api(key, f"/services/{srv}/deploys", "POST", {"clearCache": "do_not_clear"})
+    # clearCache обязателен: Render иногда переиспользует кэш COPY-слоёв и молча
+    # деплоит старый webapp/код, помечая деплой live (был такой баг). Чистим всегда.
+    st, d = api(key, f"/services/{srv}/deploys", "POST", {"clearCache": "clear"})
     if st not in (200, 201):
         print("не удалось стартовать деплой:", st, d); sys.exit(1)
     dep = (d.get("deploy", d) if isinstance(d, dict) else {})
