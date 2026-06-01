@@ -35,6 +35,8 @@ const ICONS = {
   "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   "flame": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
   "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  "thumbs-up": '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+  "thumbs-down": '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
   "info": '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   // монохромные лица настроения (единый размер 24×24)
   "face-1": '<circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><path d="M7.5 8 10 9"/><path d="m14 9 2.5-1"/><path d="M9 10h.01"/><path d="M15 10h.01"/>',
@@ -625,6 +627,35 @@ const CHAT_KEY = () => "mood_chat_" + (window.__me?.id || "x");
 function loadChat() { try { return JSON.parse(localStorage.getItem(CHAT_KEY()) || "[]"); } catch (_) { return []; } }
 function saveChat(a) { try { localStorage.setItem(CHAT_KEY(), JSON.stringify(a.slice(-100))); } catch (_) {} }
 
+/* лайк/дизлайк на ответ психолога — агент учится: 👍 делает так больше, 👎 меняет подход */
+function msgReactKey(text) {
+  let h = 0; for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return "mood_react_" + (window.__me?.id || "x") + "_" + h;
+}
+function addFeedback(bubble, text) {
+  const key = msgReactKey(text);
+  let cur = ""; try { cur = localStorage.getItem(key) || ""; } catch (_) {}
+  const row = document.createElement("div");
+  row.className = "msg-fb";
+  const mk = (kind, icon) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "msg-fb-btn" + (cur === kind ? " on" : "");
+    b.innerHTML = ico(icon);
+    b.onclick = async (e) => {
+      e.stopPropagation(); haptic();
+      row.querySelectorAll(".msg-fb-btn").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      try { localStorage.setItem(key, kind); } catch (_) {}
+      try { await api("/api/v2/feedback", { method: "POST", body: { liked: kind === "up", text: text.slice(0, 1000) } }); } catch (_) {}
+    };
+    return b;
+  };
+  row.appendChild(mk("up", "thumbs-up"));
+  row.appendChild(mk("down", "thumbs-down"));
+  bubble.appendChild(row);
+}
+
 let lastChatSig = null;
 function chatRender(force) {
   const box = $("chatMessages");
@@ -645,6 +676,7 @@ function chatRender(force) {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "user" : "agent");
     el.innerHTML = mdLite(m.text);
+    if (m.role !== "user" && m.text && m.text.trim()) addFeedback(el, m.text);
     box.appendChild(el);
   }
   box.scrollTop = box.scrollHeight;
@@ -877,7 +909,7 @@ function setupInstallPrompt() {
   const reveal = () => { banner.hidden = false; };
 
   if (/iphone|ipad|ipod/i.test(navigator.userAgent)) {  // iOS: программного prompt нет — инструкция
-    $("installText").textContent = "добавь MOOD на экран «Домой»: «Поделиться» → «На экран Домой»";
+    $("installText").textContent = "добавь soul на экран «Домой»: «Поделиться» → «На экран Домой»";
     $("installBtn").hidden = true;
     setTimeout(reveal, 1500);
     return;
@@ -1064,6 +1096,7 @@ async function sendMessage() {
     const f = loadChat();
     f[f.length - 1].text = acc || "(пусто)";
     saveChat(f);
+    if (acc && acc.trim()) addFeedback(agentEl, acc);   // 👍/👎 сразу на свежий ответ
   };
   const runStream = async () => {
     const ctrl = new AbortController();
@@ -1463,7 +1496,7 @@ async function exportPortrait() {
   ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
   // лого / заголовок
   ctx.fillStyle = "#c0a080"; ctx.font = "700 56px 'Space Grotesk', sans-serif";
-  ctx.fillText("◆ MOOD", pad, pad + 50);
+  ctx.fillText("◆ soul", pad, pad + 50);
   ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "400 28px Inter, sans-serif";
   ctx.fillText("твой психологический портрет", pad, pad + 95);
   // текст
@@ -1472,7 +1505,7 @@ async function exportPortrait() {
   for (const ln of lines) { ctx.fillText(ln, pad, y); y += lh; }
   // подвал
   ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "400 24px Inter, sans-serif";
-  ctx.fillText("mood — личный психолог в кармане", pad, H - pad + 20);
+  ctx.fillText("soul — личный психолог в кармане", pad, H - pad + 20);
 
   const blob = await new Promise((r) => cv.toBlob(r, "image/png"));
   if (!blob) return;

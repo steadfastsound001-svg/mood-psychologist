@@ -797,6 +797,19 @@ canvas { display: block; max-width: 100%; }
   padding: var(--s-6) var(--s-5);
 }
 
+/* лайк/дизлайк на ответ психолога */
+.msg-fb { display: flex; gap: 4px; margin-top: 7px; }
+.msg-fb-btn {
+  background: transparent; border: none; cursor: pointer;
+  padding: 3px; border-radius: 8px; color: var(--hint); opacity: 0.45;
+  display: inline-flex; transition: opacity .15s, color .15s, background .15s, transform .1s;
+}
+.msg-fb-btn .ico { width: 15px; height: 15px; }
+.msg-fb-btn:active { transform: scale(0.85); }
+.msg-fb-btn.on { opacity: 1; color: var(--accent); background: var(--surface-strong); }
+.msg-fb-btn.on .ico { fill: rgba(var(--accent-rgb), 0.18); }
+@media (hover: hover) { .msg-fb-btn:hover { opacity: 1; color: var(--text); } }
+
 .chat-input-bar {
   display: flex;
   align-items: flex-end;

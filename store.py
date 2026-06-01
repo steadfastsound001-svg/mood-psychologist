@@ -127,6 +127,9 @@ _SCHEMA = [
     """CREATE TABLE IF NOT EXISTS portrait_feedback(
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
       liked INTEGER DEFAULT 1, text TEXT DEFAULT '', ts REAL)""",
+    """CREATE TABLE IF NOT EXISTS msg_feedback(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+      liked INTEGER DEFAULT 1, text TEXT DEFAULT '', ts REAL)""",
     """CREATE TABLE IF NOT EXISTS agent_config(
       key TEXT PRIMARY KEY, value TEXT DEFAULT '', updated_at REAL)""",
 ]
@@ -461,6 +464,32 @@ def portrait_feedback_blob(user_id: int, limit: int = 25) -> str:
         t = (r.get("text") or "").strip()
         parts.append(f"[{mark}] {t}" if t else f"[{mark}]")
     return "\n".join(parts)
+
+
+# ───────────── лайк/дизлайк на ответы психолога (агент учится на лету) ─────────────
+
+def add_msg_feedback(user_id: int, liked: bool, text: str = "") -> None:
+    execute("INSERT INTO msg_feedback(user_id, liked, text, ts) VALUES(?,?,?,?)",
+            (user_id, 1 if liked else 0, (text or "").strip()[:1000], time.time()))
+
+
+def msg_feedback_digest(user_id: int, limit: int = 12) -> str:
+    """Короткая сводка реакций клиента на ответы психолога — подаётся в чат,
+    чтобы агент делал больше того, что заходит, и меньше того, что не зашло."""
+    rows = query(
+        "SELECT liked, text FROM msg_feedback WHERE user_id=? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    )
+    if not rows:
+        return ""
+    liked = [(r.get("text") or "").strip() for r in rows if r.get("liked")]
+    disliked = [(r.get("text") or "").strip() for r in rows if not r.get("liked")]
+    parts = []
+    if liked:
+        parts.append("👍 зашло (делай так больше): " + " | ".join(t[:140] for t in liked[:4] if t))
+    if disliked:
+        parts.append("👎 не зашло (так не надо): " + " | ".join(t[:140] for t in disliked[:4] if t))
+    return "\n".join(p for p in parts if p.strip().rstrip(":"))
 
 
 # ───────────── конфиг агента (редактируемые промпты/настройки) ─────────────

@@ -1,13 +1,13 @@
 {
-  "name": "MOOD · психолог",
-  "short_name": "MOOD",
-  "description": "Личный психолог. Слепок ментального здоровья NOW и HERO.",
+  "name": "soul · психолог",
+  "short_name": "soul",
+  "description": "Личный психолог в кармане. Честный разговор, портрет личности, динамика состояния.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#000000",
-  "theme_color": "#000000",
+  "background_color": "#2d2621",
+  "theme_color": "#2d2621",
   "categories": ["health", "lifestyle", "productivity"],
   "lang": "ru",
   "icons": [

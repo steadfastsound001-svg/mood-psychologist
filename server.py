@@ -346,6 +346,9 @@ class Handler(BaseHTTPRequestHandler):
         """Стримит ответ психолога чанками (text/plain), затем сохраняет диалог."""
         prof = store.get_profile(uid)
         insights = store.get_insights(uid)
+        digest = store.msg_feedback_digest(uid)         # лайки/дизлайки → агент подстраивается на лету
+        if digest:
+            insights = (insights + "\n\n" if insights else "") + "[реакции клиента на твои прошлые ответы]\n" + digest
         messages = store.recent_messages(uid, 20) + [{"role": "user", "content": text}]
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -357,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             for delta in stream_completion_sync(
                 system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 150), task="dialog",
+                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 400), task="dialog",
             ):
                 acc.append(delta)
                 try:
@@ -399,7 +402,7 @@ class Handler(BaseHTTPRequestHandler):
             agent_config.clear_overrides()
         try:
             sys_blocks = user_system(prof.get("compiled", ""), insights)
-            max_tok = agent_config.cfg_int("chat_max_tokens", 150)
+            max_tok = agent_config.cfg_int("chat_max_tokens", 400)
         except Exception:
             sys_blocks, max_tok = user_system(prof.get("compiled", ""), insights), 150
         self.send_response(200)
@@ -765,6 +768,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     self._json(400, {"error": "empty"}); return
                 self._chat_stream(uid, text); return
+
+            if u.path == "/api/v2/feedback":          # лайк/дизлайк на ответ психолога
+                store.add_msg_feedback(uid, bool(body.get("liked")), body.get("text") or "")
+                self._json(200, {"ok": True}); return
 
             if u.path == "/api/mood/checkin":
                 try:

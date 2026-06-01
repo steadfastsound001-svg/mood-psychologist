@@ -170,7 +170,7 @@ def cmd_push():
             continue
         ts = e.get("ts") or time.time()
         day = time.strftime("%d.%m.%Y", time.localtime(ts))
-        write_note(f"MOOD дневник — {day}", e.get("text", ""))
+        write_note(f"soul дневник — {day}", e.get("text", ""))
         done.add(eid); wrote += 1
         time.sleep(0.2)
     state["pushed_ids"] = sorted(done)
