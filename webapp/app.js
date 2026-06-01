@@ -124,8 +124,28 @@ function isInTelegram() {
   return !!(tg && ((tg.initData && tg.initData.length > 0) || (tg.platform && tg.platform !== "unknown")));
 }
 
+/* ───────── SPLASH (логотип + прогрузка на входе) ───────── */
+function showSplash() {
+  const s = $("splash"); if (!s) return;
+  s.style.display = ""; s.classList.remove("hide");
+  setTimeout(() => hapticOk(), 60);   // вибро на входе (Telegram/Android; iOS-PWA без вибро)
+}
+function hideSplash() {
+  const s = $("splash"); if (!s) return;
+  s.classList.add("hide");
+  setTimeout(() => { s.style.display = "none"; }, 520);
+}
+/* тихо греем кэши (stats/дневник), чтобы при заходе всё было готово — с потолком по времени */
+async function preloadData() {
+  const jobs = [];
+  try { jobs.push(loadStats()); } catch (_) {}
+  try { jobs.push(loadDiary()); } catch (_) {}
+  try { await Promise.race([Promise.allSettled(jobs), sleep(2200)]); } catch (_) {}
+}
+
 /* ───────── GATE ───────── */
 async function boot() {
+  showSplash();
   // токен из Google-редиректа: /?token=...&onb=0
   const params = new URLSearchParams(location.search);
   const urlToken = params.get("token");
@@ -134,6 +154,7 @@ async function boot() {
     history.replaceState({}, "", location.pathname);
   }
   if (params.get("auth_error")) {
+    hideSplash();
     initAuth(); show("authScreen");
     const err = $("authError"); err.textContent = "google-вход не удался, попробуй ещё раз"; err.hidden = false;
     return;
@@ -145,14 +166,19 @@ async function boot() {
       if (r.token) { setToken(r.token); window.__me = r.user; }
     } catch (_) {}
   }
-  if (!getToken()) { initAuth(); show("authScreen"); return; }
+  if (!getToken()) { hideSplash(); initAuth(); show("authScreen"); return; }
   try {
     const me = await api("/api/me");
     window.__me = me.user;
-    if (lockEnabled()) { await requireUnlock(); }   // Face ID / код
-    if (!me.onboarded) { startOnboarding(); show("onboardScreen"); }
-    else { initApp(); show("app"); }
+    if (lockEnabled()) { await unlockGate(); }       // тап по сплэшу → Face ID (последний метод)
+    if (!me.onboarded) { hideSplash(); startOnboarding(); show("onboardScreen"); }
+    else {
+      initApp(); show("app");
+      await preloadData();                            // догружаем инфу под сплэшем
+      hideSplash();
+    }
   } catch (e) {
+    hideSplash();
     clearToken();
     initAuth();
     show("authScreen");
@@ -160,7 +186,7 @@ async function boot() {
 }
 
 /* ───────── APP-LOCK: Face ID / код (локально, на устройстве) ───────── */
-const LOCK_PIN = "mood_lock_pin", LOCK_FACE = "mood_lock_face";
+const LOCK_PIN = "mood_lock_pin", LOCK_FACE = "mood_lock_face", LOCK_LAST = "mood_lock_last";
 const lockEnabled = () => { try { return !!(localStorage.getItem(LOCK_PIN) || localStorage.getItem(LOCK_FACE)); } catch (_) { return false; } };
 async function faceAvailable() { try { return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch (_) { return false; } }
 async function sha(s) {
@@ -196,7 +222,7 @@ async function lockPress(ch) {
 }
 async function lockComplete(pin) {
   if (lockMode === "unlock") {
-    if ((await sha(pin)) === localStorage.getItem(LOCK_PIN)) lockClose(true);
+    if ((await sha(pin)) === localStorage.getItem(LOCK_PIN)) { try { localStorage.setItem(LOCK_LAST, "pin"); } catch (_) {} lockClose(true); }
     else { lockErrMsg("неверный код"); lockBuf = ""; lockDots(); }
   } else if (lockMode === "set1") {
     lockFirst = pin; lockBuf = ""; lockMode = "set2"; lockDots(); $("lockTitle").textContent = "повтори код";
@@ -229,6 +255,7 @@ async function faceUnlock(silent) {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       allowCredentials: [{ type: "public-key", id: unb64(id) }],
       userVerification: "required", timeout: 60000 } });
+    try { localStorage.setItem(LOCK_LAST, "face"); } catch (_) {}
     lockClose(true); return true;
   } catch (_) { if (!silent) lockErrMsg("Face ID не прошёл"); return false; }
 }
@@ -244,13 +271,33 @@ async function registerFace() {
     localStorage.setItem(LOCK_FACE, b64(cred.rawId)); return true;
   } catch (_) { return false; }
 }
+/* тап по сплэшу = пользовательский жест → WebAuthn (Face ID) можно вызвать сразу.
+   без него iOS блокирует автозапуск Face ID на загрузке страницы. */
+function unlockGate() {
+  return new Promise((resolve) => {
+    const s = $("splash"), hint = $("splashHint");
+    if (!s) { requireUnlock().then(resolve); return; }
+    const face = !!localStorage.getItem(LOCK_FACE);
+    hint.textContent = face ? "коснись для входа · Face ID" : "коснись, чтобы ввести код";
+    hint.hidden = false;
+    s.classList.add("tappable");
+    s.addEventListener("click", async () => {
+      s.classList.remove("tappable");
+      hint.textContent = "вход…";
+      await requireUnlock();
+      hint.hidden = true;
+      resolve(true);
+    }, { once: true });
+  });
+}
 async function requireUnlock() {
-  // Face ID по умолчанию — сразу, без выбора метода
-  if (localStorage.getItem(LOCK_FACE)) {
-    if (await faceUnlock(true)) return true;
-    if (await faceUnlock(true)) return true;   // вторая попытка
+  // последний метод входа; по умолчанию Face ID. без выбора-меню.
+  const last = localStorage.getItem(LOCK_LAST);
+  const face = !!localStorage.getItem(LOCK_FACE);
+  if (face && last !== "pin") {
+    if (await faceUnlock(false)) return true;  // тап-жест уже есть → Face ID откроется сразу
   }
-  return await showLock("unlock");             // покажет Face-кнопку и/или код
+  return await showLock("unlock");             // фолбэк: код / Face-кнопка
 }
 function lockStateText() {
   const el = $("lockState"); if (!el) return;
@@ -443,6 +490,7 @@ function initApp() {
     setupInstallPrompt();
     loadExtraTests();
     setupSwipe();
+    startChatPoll();
   }
   switchView("chat");
 }
@@ -537,6 +585,23 @@ function setupSwipe() {
     }, 260);
     locked = null; dragging = false; from = to = null;
   }, { passive: true });
+}
+
+/* живой синк: пока открыт чат — тихо подтягиваем канон из БД (одна база на TG и апп).
+   написал боту в Telegram → появляется здесь за ~6с. рендер с guard'ом → без мигания. */
+let chatPollTimer = null;
+function startChatPoll() {
+  if (chatPollTimer) return;
+  const sig = (a) => JSON.stringify(a.map((m) => [m.role, m.text]));
+  chatPollTimer = setInterval(async () => {
+    if (curView !== "chat" || streaming || document.hidden) return;
+    try {
+      const r = await api("/api/v2/messages");
+      if (!r || !Array.isArray(r.messages)) return;
+      const h = r.messages.map((m) => ({ role: m.role === "user" ? "user" : "agent", text: m.content }));
+      if (h.length && sig(h) !== sig(loadChat())) { saveChat(h); chatRender(); }   // сервер опередил (напр. из ТГ)
+    } catch (_) {}
+  }, 6000);
 }
 
 /* история чата живёт в БД (одна на все устройства). локалка — лишь мгновенный кэш.

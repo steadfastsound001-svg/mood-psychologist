@@ -32,7 +32,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
 <!-- Telegram WebApp SDK — даёт window.Telegram.WebApp + initData для нативного входа в мини-аппе -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="/style.css?v=45">
+<link rel="stylesheet" href="/style.css?v=46">
 <script>
   // тема до первой отрисовки — без мигания
   try {
@@ -42,6 +42,14 @@
 </script>
 </head>
 <body>
+
+<!-- SPLASH: логотип + прогрузка (вибро на входе, данные грузятся под ним) -->
+<div id="splash" class="splash">
+  <div class="splash-mark">◆</div>
+  <div class="splash-word">MOOD</div>
+  <div class="splash-spin"></div>
+  <div class="splash-hint" id="splashHint" hidden></div>
+</div>
 
 <!-- кастомный курсор (только desktop) -->
 <div id="cursorRing" class="cursor-ring"></div>
@@ -306,6 +314,6 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=45"></script>
+<script src="/app.js?v=46"></script>
 </body>
 </html>

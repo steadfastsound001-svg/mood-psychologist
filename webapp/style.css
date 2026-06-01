@@ -721,6 +721,38 @@ canvas { display: block; max-width: 100%; }
 }
 .lock-cancel { display: inline-block; margin-top: 14px; }
 
+/* ───────── SPLASH (логотип + прогрузка на входе) ───────── */
+.splash {
+  position: fixed; inset: 0; z-index: 880;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px;
+  background: var(--page-bg);
+  transition: opacity .5s ease;
+  padding: 24px;
+}
+.splash.hide { opacity: 0; pointer-events: none; }
+.splash.tappable { cursor: pointer; }
+.splash-mark {
+  font-size: 58px; line-height: 1;
+  background: var(--grad-spectrum); -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 18px rgba(var(--accent-rgb),0.45));
+  animation: splashPulse 1.8s ease-in-out infinite;
+}
+.splash-word {
+  font-family: var(--font-display); font-weight: 700; letter-spacing: 8px;
+  font-size: 22px; color: var(--text); padding-left: 8px;
+}
+.splash-spin {
+  width: 28px; height: 28px; border-radius: 50%; margin-top: 8px;
+  border: 2.5px solid var(--surface-strong); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+.splash.tappable .splash-spin { display: none; }
+.splash-hint { font-size: var(--t-footnote); color: var(--hint); margin-top: 10px; letter-spacing: .4px; text-align: center; }
+@keyframes splashPulse { 0%,100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.06); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .splash-mark { animation: none; } }
+
 .msg {
   max-width: 82%;
   padding: 10px 15px;
