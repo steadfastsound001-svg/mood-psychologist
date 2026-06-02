@@ -587,6 +587,15 @@ function setupSwipe() {
     }, 260);
     locked = null; dragging = false; from = to = null;
   }, { passive: true });
+
+  // iOS может оборвать жест (системный свайп/конфликт скролла) без touchend —
+  // тогда вью оставалась бы как swipe-layer, сдвинутая за экран («страницы не видно»). сбрасываем.
+  const cancelSwipe = () => {
+    [from, to].forEach((el) => { if (el) { el.classList.remove("swipe-layer", "animate"); el.style.transform = ""; } });
+    reHide();
+    locked = null; dragging = false; from = to = null;
+  };
+  app.addEventListener("touchcancel", cancelSwipe, { passive: true });
 }
 
 /* живой синк: пока открыт чат — тихо подтягиваем канон из БД (одна база на TG и апп).
@@ -656,6 +665,37 @@ function addFeedback(bubble, text) {
   bubble.appendChild(row);
 }
 
+/* удержание сообщения → копировать полный текст + облачко «скопировано» */
+function copyText(t) {
+  if (!t) return;
+  try { if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(t); return; } } catch (_) {}
+  try { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); } catch (_) {}
+}
+function copiedBubble(msg) {
+  msg.querySelectorAll(".copied-bubble").forEach((x) => x.remove());
+  const b = document.createElement("div");
+  b.className = "copied-bubble"; b.textContent = "скопировано";
+  msg.appendChild(b);
+  requestAnimationFrame(() => b.classList.add("show"));
+  setTimeout(() => { b.classList.remove("show"); setTimeout(() => b.remove(), 240); }, 1100);
+}
+function setupMsgCopy() {
+  const box = $("chatMessages"); if (!box || box._copyWired) return;
+  box._copyWired = true;
+  let timer = null, target = null, y0 = 0;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } target = null; };
+  const fire = (msg) => { const t = (msg.dataset.full || msg.textContent || "").trim(); copyText(t); haptic("medium"); copiedBubble(msg); };
+  box.addEventListener("touchstart", (e) => {
+    const msg = e.target.closest(".msg"); if (!msg || e.target.closest(".msg-fb")) return;
+    target = msg; y0 = e.touches[0].clientY;
+    timer = setTimeout(() => { timer = null; if (target) fire(target); }, 480);
+  }, { passive: true });
+  box.addEventListener("touchmove", (e) => { if (target && Math.abs(e.touches[0].clientY - y0) > 10) cancel(); }, { passive: true });
+  box.addEventListener("touchend", cancel, { passive: true });
+  box.addEventListener("touchcancel", cancel, { passive: true });
+  box.addEventListener("contextmenu", (e) => { const msg = e.target.closest(".msg"); if (msg && !e.target.closest(".msg-fb")) { e.preventDefault(); fire(msg); } });
+}
+
 let lastChatSig = null;
 function chatRender(force) {
   const box = $("chatMessages");
@@ -675,6 +715,7 @@ function chatRender(force) {
   for (const m of h) {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "user" : "agent");
+    el.dataset.full = (m.text || "").replace(/\*\*/g, "");   // полный текст для копирования по удержанию
     el.innerHTML = mdLite(m.text);
     if (m.role !== "user" && m.text && m.text.trim()) addFeedback(el, m.text);
     box.appendChild(el);
@@ -709,6 +750,7 @@ function setupChat() {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!send.disabled) sendMessage(); } });
   send.addEventListener("click", sendMessage);
   setupVoice(input, upd);
+  setupMsgCopy();
   const db = $("chatDiaryBtn");
   if (db) db.onclick = toggleDiaryMode;
 }
@@ -1096,6 +1138,7 @@ async function sendMessage() {
     const f = loadChat();
     f[f.length - 1].text = acc || "(пусто)";
     saveChat(f);
+    agentEl.dataset.full = (acc || "").replace(/\*\*/g, "");
     if (acc && acc.trim()) addFeedback(agentEl, acc);   // 👍/👎 сразу на свежий ответ
   };
   const runStream = async () => {

@@ -732,6 +732,7 @@ canvas { display: block; max-width: 100%; }
 }
 .splash.hide { opacity: 0; pointer-events: none; }
 .splash.tappable { cursor: pointer; }
+.brand-mark { width: 1em; height: 1em; display: block; }
 .splash-mark {
   font-size: 58px; line-height: 1;
   background: var(--grad-spectrum); -webkit-background-clip: text; background-clip: text;
@@ -754,6 +755,7 @@ canvas { display: block; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) { .splash-mark { animation: none; } }
 
 .msg {
+  position: relative;
   max-width: 82%;
   padding: 10px 15px;
   border-radius: 22px;
@@ -796,6 +798,19 @@ canvas { display: block; max-width: 100%; }
   font-size: var(--t-callout);
   padding: var(--s-6) var(--s-5);
 }
+
+/* облачко «скопировано» при удержании сообщения */
+.copied-bubble {
+  position: absolute; top: -8px; left: 50%;
+  transform: translate(-50%, 6px) scale(0.9);
+  background: var(--text); color: var(--bg);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+  padding: 4px 11px; border-radius: 999px; white-space: nowrap;
+  pointer-events: none; opacity: 0; z-index: 6;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.28);
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+}
+.copied-bubble.show { opacity: 1; transform: translate(-50%, -6px) scale(1); }
 
 /* лайк/дизлайк на ответ психолога */
 .msg-fb { display: flex; gap: 4px; margin-top: 7px; }
