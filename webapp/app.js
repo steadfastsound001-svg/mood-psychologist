@@ -177,7 +177,9 @@ async function boot() {
     else {
       initApp(); show("app");
       await preloadData();                            // догружаем инфу под сплэшем
-      hideSplash();
+      try { await Promise.race([document.fonts.ready, sleep(800)]); } catch (_) {}  // без FOUT-шва
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // layout устаканился
+      hideSplash();                                   // сплэш гаснет поверх уже готового экрана
     }
   } catch (e) {
     hideSplash();
@@ -682,12 +684,22 @@ function copiedBubble(msg) {
 function setupMsgCopy() {
   const box = $("chatMessages"); if (!box || box._copyWired) return;
   box._copyWired = true;
-  let timer = null, target = null, y0 = 0;
-  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } target = null; };
-  const fire = (msg) => { const t = (msg.dataset.full || msg.textContent || "").trim(); copyText(t); haptic("medium"); copiedBubble(msg); };
+  let timer = null, growTimer = null, target = null, y0 = 0;
+  const ungrow = () => { if (target) target.classList.remove("pressing"); };
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (growTimer) { clearTimeout(growTimer); growTimer = null; }
+    ungrow(); target = null;
+  };
+  const fire = (msg) => {
+    const t = (msg.dataset.full || msg.textContent || "").trim();
+    copyText(t); haptic("medium"); copiedBubble(msg);
+    setTimeout(() => msg.classList.remove("pressing"), 240);   // подержать «облачко» и плавно вернуть
+  };
   box.addEventListener("touchstart", (e) => {
     const msg = e.target.closest(".msg"); if (!msg || e.target.closest(".msg-fb")) return;
     target = msg; y0 = e.touches[0].clientY;
+    growTimer = setTimeout(() => { growTimer = null; if (target) target.classList.add("pressing"); }, 150);
     timer = setTimeout(() => { timer = null; if (target) fire(target); }, 480);
   }, { passive: true });
   box.addEventListener("touchmove", (e) => { if (target && Math.abs(e.touches[0].clientY - y0) > 10) cancel(); }, { passive: true });

@@ -764,7 +764,19 @@ canvas { display: block; max-width: 100%; }
   word-wrap: break-word;
   white-space: pre-wrap;
   animation: msgIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;             /* глушим нативное меню/лупу iOS */
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
+  transform-origin: center;
+  will-change: transform;
 }
+.msg.pressing {
+  transform: scale(1.07);                  /* при удержании выходит за свои границы как облачко */
+  z-index: 7;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.32);
+}
+.msg.user.pressing { transform-origin: right center; }
+.msg.agent.pressing { transform-origin: left center; }
 .msg.user {
   align-self: flex-end;
   background: var(--grad-spectrum);
