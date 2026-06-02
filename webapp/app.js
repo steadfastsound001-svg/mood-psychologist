@@ -494,6 +494,7 @@ function initApp() {
     setupInstallPrompt();
     loadExtraTests();
     setupSwipe();
+    setupDiaryCopy();
     startChatPoll();
   }
   switchView("chat");
@@ -518,7 +519,7 @@ function switchView(view, animate) {
   }
   curView = view;
   if (view === "profile") loadProfile();
-  if (view === "chat") hydrateChat();
+  if (view === "chat") { hydrateChat(); scrollChatBottom(); }   // открываем на последних сообщениях
   if (view === "diary") loadDiary();
 }
 
@@ -681,31 +682,42 @@ function copiedBubble(msg) {
   requestAnimationFrame(() => b.classList.add("show"));
   setTimeout(() => { b.classList.remove("show"); setTimeout(() => b.remove(), 240); }, 1100);
 }
-function setupMsgCopy() {
-  const box = $("chatMessages"); if (!box || box._copyWired) return;
+/* универсальное удержание→копирование: рост-облачко + копи + «скопировано».
+   getText(el) даёт что копировать; skip — селекторы, по которым удержание не срабатывает. */
+function wireLongPressCopy(box, itemSel, getText, opts = {}) {
+  if (!box || box._copyWired) return;
   box._copyWired = true;
+  const skip = opts.skip || "";
   let timer = null, growTimer = null, target = null, y0 = 0;
-  const ungrow = () => { if (target) target.classList.remove("pressing"); };
   const cancel = () => {
     if (timer) { clearTimeout(timer); timer = null; }
     if (growTimer) { clearTimeout(growTimer); growTimer = null; }
-    ungrow(); target = null;
+    if (target) target.classList.remove("pressing");
+    target = null;
   };
-  const fire = (msg) => {
-    const t = (msg.dataset.full || msg.textContent || "").trim();
-    copyText(t); haptic("medium"); copiedBubble(msg);
-    setTimeout(() => msg.classList.remove("pressing"), 240);   // подержать «облачко» и плавно вернуть
+  const fire = (el) => {
+    const t = (getText(el) || "").trim(); if (!t) return;
+    copyText(t); haptic("medium"); copiedBubble(el);
+    setTimeout(() => el.classList.remove("pressing"), 240);   // подержать «облачко» и плавно вернуть
   };
+  const pick = (e) => { const el = e.target.closest(itemSel); if (!el || (skip && e.target.closest(skip))) return null; return el; };
   box.addEventListener("touchstart", (e) => {
-    const msg = e.target.closest(".msg"); if (!msg || e.target.closest(".msg-fb")) return;
-    target = msg; y0 = e.touches[0].clientY;
+    const el = pick(e); if (!el) return;
+    target = el; y0 = e.touches[0].clientY;
     growTimer = setTimeout(() => { growTimer = null; if (target) { target.classList.add("pressing"); haptic("light"); } }, 150);
     timer = setTimeout(() => { timer = null; if (target) fire(target); }, 480);
   }, { passive: true });
   box.addEventListener("touchmove", (e) => { if (target && Math.abs(e.touches[0].clientY - y0) > 10) cancel(); }, { passive: true });
   box.addEventListener("touchend", cancel, { passive: true });
   box.addEventListener("touchcancel", cancel, { passive: true });
-  box.addEventListener("contextmenu", (e) => { const msg = e.target.closest(".msg"); if (msg && !e.target.closest(".msg-fb")) { e.preventDefault(); fire(msg); } });
+  box.addEventListener("contextmenu", (e) => { const el = pick(e); if (el) { e.preventDefault(); fire(el); } });
+}
+function setupMsgCopy() {
+  wireLongPressCopy($("chatMessages"), ".msg", (el) => el.dataset.full || el.textContent, { skip: ".msg-fb" });
+}
+function setupDiaryCopy() {
+  // копируем ТОЛЬКО мою запись (dataset.copy = текст записи), не отклик психолога
+  wireLongPressCopy($("diaryList"), ".diary-entry", (el) => el.dataset.copy || "", { skip: ".diary-menu, .diary-menu-btn, textarea, button" });
 }
 
 let lastChatSig = null;
@@ -732,7 +744,12 @@ function chatRender(force) {
     if (m.role !== "user" && m.text && m.text.trim()) addFeedback(el, m.text);
     box.appendChild(el);
   }
-  box.scrollTop = box.scrollHeight;
+  scrollChatBottom();
+}
+/* всегда открывать на последних сообщениях; двойной rAF — ждём укладку layout */
+function scrollChatBottom() {
+  const box = $("chatMessages"); if (!box) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; }));
 }
 
 /* проактивное приветствие: психолог сам начинает разговор (раз в день) */
@@ -870,6 +887,7 @@ function renderDiary(entries, force) {
   entries.forEach((e) => {
     const el = document.createElement("div");
     el.className = "diary-entry";
+    el.dataset.copy = e.text || "";            // для удержания→копирования (только моя запись)
     const d = new Date((e.ts || 0) * 1000);
     const date = isNaN(d) ? "" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
     const sym = moodSymbolForTs(e.ts);
@@ -1131,15 +1149,21 @@ async function sendMessage() {
   const render = (s) => { agentEl.innerHTML = mdLite(s); };  // mdLite экранирует html (см. mdLite)
   // автоскролл только если юзер у низа — иначе не мешаем листать вверх
   const nearBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 90;
-  // посимвольный вывод: показ догоняет буфер плавно, не зависит от рывков сети
-  const typer = () => {
+  // посимвольный вывод по ВРЕМЕНИ: печатает видимо, даже если прокси отдал текст одним куском.
+  // базовая скорость + лёгкое ускорение, если буфер далеко впереди (не отстаём от сети), но с потолком.
+  let lastT = 0;
+  const typer = (t) => {
     if (shown < acc.length) {
+      if (!lastT) lastT = t;
+      const dt = Math.min(0.05, (t - lastT) / 1000); lastT = t;
+      const remaining = acc.length - shown;
+      const cps = Math.min(140, 42 + remaining * 1.4);
       const stick = nearBottom();
-      shown += Math.max(1, Math.ceil((acc.length - shown) / 18));
+      shown = Math.min(acc.length, shown + Math.max(1, Math.round(cps * dt)));
       render(acc.slice(0, shown));
       if (stick) box.scrollTop = box.scrollHeight;
       requestAnimationFrame(typer);
-    } else { typing = false; }
+    } else { typing = false; lastT = 0; }
   };
   const pump = () => { if (!typing) { typing = true; requestAnimationFrame(typer); } };
   const done = () => {
@@ -1450,7 +1474,7 @@ function renderTests(s) {
   const ob = document.createElement("button");
   ob.className = "test-item" + (obDone ? " done" : "");
   ob.innerHTML = `<span class="test-emoji">${obDone ? "◆" : "◇"}</span><span class="test-title">первичный тест о тебе</span><span class="test-state">${obDone ? "пройден" : "пройти →"}</span>`;
-  ob.onclick = () => { haptic(); startOnboardingAgain(); };
+  ob.onclick = () => { haptic(); if (obDone && !confirm("Тест уже пройден. Пройти заново?")) return; startOnboardingAgain(); };
   box.appendChild(ob);
   if (!extraTests.length) return;
   extraTests.forEach((t) => {
@@ -1458,7 +1482,7 @@ function renderTests(s) {
     const el = document.createElement("button");
     el.className = "test-item" + (done ? " done" : "");
     el.innerHTML = `<span class="test-emoji">${done ? "◆" : "◇"}</span><span class="test-title">${t.title}</span><span class="test-state">${done ? "пройден" : "пройти →"}</span>`;
-    el.onclick = () => { haptic(); openTest(t); };
+    el.onclick = () => { haptic(); if (done && !confirm("Тест уже пройден. Пройти заново?")) return; openTest(t); };
     box.appendChild(el);
   });
 }
@@ -1633,7 +1657,13 @@ function renderTestQ() {
     const b = document.createElement("button");
     b.className = "scale-btn" + (tmAnswers[q.id] === i + 1 ? " sel" : "");
     b.innerHTML = `<span class="scale-num">${i + 1}</span><span class="scale-lbl">${label}</span>`;
-    b.onclick = () => { haptic(); tmAnswers[q.id] = i + 1; setTimeout(tmNext, 160); };
+    b.onclick = () => {
+      haptic();
+      tmAnswers[q.id] = i + 1;
+      wrap.querySelectorAll(".scale-btn").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel", "tapped");            // отклик нажатия: выделение + поп
+      setTimeout(tmNext, 280);                     // дать доиграть перед переходом к след. вопросу
+    };
     wrap.appendChild(b);
   });
   box.appendChild(wrap);
