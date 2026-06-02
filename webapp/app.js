@@ -699,7 +699,7 @@ function setupMsgCopy() {
   box.addEventListener("touchstart", (e) => {
     const msg = e.target.closest(".msg"); if (!msg || e.target.closest(".msg-fb")) return;
     target = msg; y0 = e.touches[0].clientY;
-    growTimer = setTimeout(() => { growTimer = null; if (target) target.classList.add("pressing"); }, 150);
+    growTimer = setTimeout(() => { growTimer = null; if (target) { target.classList.add("pressing"); haptic("light"); } }, 150);
     timer = setTimeout(() => { timer = null; if (target) fire(target); }, 480);
   }, { passive: true });
   box.addEventListener("touchmove", (e) => { if (target && Math.abs(e.touches[0].clientY - y0) > 10) cancel(); }, { passive: true });
@@ -1381,13 +1381,13 @@ function renderMood(s) {
   // из чего складывается оценка — наглядно, понятнее чем абстрактные «отметки»
   const comp = $("moodChart");
   if (comp) comp.innerHTML = moodComposition(s);
-  // тренд во времени — только когда есть РЕАЛЬНОЕ движение (не плоская линия)
+  // ритм по дням недели — какой день стабильно тяжелее/легче (полезнее линии во времени)
   const tr = $("moodBars");
   if (tr) {
-    const sp = sparkline(hist);
-    tr.innerHTML = sp
-      ? `<div class="mood-chart-cap">как менялось со временем</div>${sp}`
-      : chartLock("тренд появится, когда настроение начнёт меняться — отмечай его в дневнике");
+    const wr = weekRhythm(hist);
+    tr.innerHTML = wr
+      ? `<div class="mood-chart-cap">ритм по дням недели</div>${wr}`
+      : chartLock("ритм недели проявится, когда наберётся пара дней — отмечай настроение в дневнике");
   }
 }
 
@@ -1413,28 +1413,26 @@ function moodComposition(s) {
     bar("сейчас", "дневник + разговоры", s.mood_dynamic);
 }
 
-/* sparkline: SVG-полилиния по истории MOOD */
-function sparkline(hist) {
-  if (!hist || hist.length < 3) return "";
-  const vals = hist.map((h) => h.score);
-  const min = Math.min(...vals), max = Math.max(...vals);
-  if (max === min) return "";                 // плоская линия — не рисуем (бессмысленно)
-  const span = max - min || 1;
-  const W = 280, H = 56, pad = 4;
-  const n = vals.length;
-  const pts = vals.map((v, i) => {
-    const x = pad + (i / (n - 1)) * (W - 2 * pad);
-    const y = H - pad - ((v - min) / span) * (H - 2 * pad);
-    return [x.toFixed(1), y.toFixed(1)];
+/* ритм по дням недели: средний MOOD за каждый день недели (Пн..Вс).
+   h.day = номер epoch-дня; epoch-день*86400000 → getUTCDay (0=Вс..6=Сб) → Mon0. */
+function weekRhythm(hist) {
+  if (!hist || hist.length < 2) return "";
+  const W = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+  const sum = Array(7).fill(0), cnt = Array(7).fill(0);
+  hist.forEach((h) => {
+    const jd = new Date(h.day * 86400000).getUTCDay();
+    const wi = (jd + 6) % 7;
+    sum[wi] += h.score; cnt[wi] += 1;
   });
-  const line = pts.map((p) => p.join(",")).join(" ");
-  const area = `${pad},${H - pad} ${line} ${W - pad},${H - pad}`;
-  const last = pts[pts.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <polyline class="spark-area" points="${area}"/>
-    <polyline class="spark-line" points="${line}"/>
-    <circle class="spark-dot" cx="${last[0]}" cy="${last[1]}" r="3.5"/>
-  </svg>`;
+  const avg = sum.map((s, i) => (cnt[i] ? s / cnt[i] : null));
+  if (avg.filter((v) => v != null).length < 2) return "";   // мало данных — фолбэк-замок
+  const cols = avg.map((v, i) => {
+    if (v == null) return `<div class="wr-col"><div class="wr-track"></div><div class="wr-day">${W[i]}</div></div>`;
+    const m = Math.round(v), col = moodColor(m);
+    const hgt = Math.max(8, m);   // минимум видимый столбик
+    return `<div class="wr-col"><div class="wr-track"><div class="wr-fill" style="height:${hgt}%;background:${col}"></div><span class="wr-v">${m}</span></div><div class="wr-day">${W[i]}</div></div>`;
+  }).join("");
+  return `<div class="week-rhythm">${cols}</div>`;
 }
 
 function updateSoulSub(s) {
@@ -1646,10 +1644,42 @@ async function tmNext() {
   const tid = tmTest.id;
   closeTest();
   hapticOk();
+  showAdapt();                                   // «сохраняю ответы → подстраиваюсь под тебя»
   try {
-    const r = await api("/api/tests/submit", { method: "POST", body: { test_id: tid, answers: tmAnswers } });
+    const [r] = await Promise.all([
+      api("/api/tests/submit", { method: "POST", body: { test_id: tid, answers: tmAnswers } }),
+      sleep(1700),                               // даём почувствовать адаптацию (сохранение всё равно идёт)
+    ]);
     if (r.stats) { lastStats = r.stats; renderMood(r.stats); renderTests(r.stats); renderAnalytics(r.stats); }
   } catch (e) { console.warn("test submit:", e); }
+  finally { hideAdapt(); }
+}
+
+/* мягкий оверлей после теста: бесшовное сохранение + ощущение «психолог подстраивается» */
+let adaptEl = null;
+function showAdapt() {
+  hideAdapt();
+  const o = document.createElement("div");
+  o.className = "adapt-ov";
+  o.innerHTML = `<div class="adapt-card"><div class="adapt-ring"></div><div class="adapt-step">сохраняю ответы…</div></div>`;
+  document.body.appendChild(o);
+  requestAnimationFrame(() => o.classList.add("show"));
+  adaptEl = o;
+  const steps = ["сохраняю ответы…", "подстраиваюсь под тебя…", "почти готово"];
+  const st = o.querySelector(".adapt-step");
+  let i = 0;
+  o._iv = setInterval(() => {
+    i++; if (i >= steps.length) return;
+    st.textContent = steps[i]; haptic("light");
+    st.style.animation = "none"; void st.offsetWidth; st.style.animation = "";  // перезапуск fade
+  }, 720);
+}
+function hideAdapt() {
+  if (!adaptEl) return;
+  clearInterval(adaptEl._iv);
+  const o = adaptEl; adaptEl = null;
+  o.classList.remove("show");
+  setTimeout(() => o.remove(), 320);
 }
 
 /* ── documents (досье) ── */

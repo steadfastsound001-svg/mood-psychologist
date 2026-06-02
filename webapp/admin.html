@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MOOD · админ</title>
+<link rel="icon" type="image/svg+xml" href="/admin-icon.svg">
+<title>soul · тех-панель</title>
 <style>
   :root{ --bg:#0e0f12; --panel:#16181d; --panel2:#1c1f26; --line:#2a2e37; --text:#e8e6e0; --hint:#8a8f9a; --accent:#c0a080; --bad:#c2683f; --good:#5bbf73; }
   *{ box-sizing:border-box; }
@@ -112,8 +113,9 @@
   .tc-sel{ background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font:13px inherit; max-width:240px; }
   .tc-sel:disabled{ opacity:.4; }
   label.tc-check{ display:flex; align-items:center; gap:6px; color:var(--hint); font-size:12px; cursor:pointer; }
-  .tc-cols{ display:flex; gap:10px; }
-  .tc-col{ flex:1; min-width:0; }
+  .tc-cols{ display:flex; gap:10px; flex-wrap:wrap; }
+  .tc-col{ flex:1 1 200px; min-width:0; }
+  .tc-slot{ display:inline-flex; align-items:center; gap:6px; }
   .tc-col .h{ font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.4px; margin-bottom:5px; }
   .tc-col .msg{ max-width:100%; }
   .cfg-pre{ margin-bottom:8px; }
@@ -408,12 +410,19 @@ function streamInto(node,q,hist,model,log,overrides){
 function testChat(items){
   const card=el("div",{class:"card2"});
   card.append(el("h2",{text:"песочница · A/B"}));
-  card.append(el("div",{class:"lead",text:"твой реальный характер и текущие промпты. НЕ сохраняется. тумблеры ниже влияют ТОЛЬКО на песочницу и мгновенно — щёлкнул, отправил, услышал разницу. A/B: один вопрос двум моделям рядом."}));
-  let modelA="", modelB="google/gemini-3.1-pro-preview", ab=false;
+  card.append(el("div",{class:"lead",text:"твой реальный характер и текущие промпты. НЕ сохраняется. тумблеры ниже влияют ТОЛЬКО на песочницу и мгновенно — щёлкнул, отправил, услышал разницу. сравнение: включи B/C/D — один вопрос уйдёт во все модели сразу, колонки рядом."}));
+  let modelA="", modelB="google/gemini-3.1-pro-preview", modelC="anthropic/claude-sonnet-4.6", modelD="gpt-5";
+  const en={ B:false, C:false, D:false };
   const selA=modelSelect(modelA, v=>modelA=v);
-  const selB=modelSelect(modelB, v=>modelB=v); selB.disabled=true;
-  const chk=el("input",{type:"checkbox"}); chk.onchange=()=>{ ab=chk.checked; selB.disabled=!ab; };
-  const bar=el("div",{class:"tc-bar"}, el("span",{class:"muted small",text:"модель:"}), selA, el("label",{class:"tc-check"}, chk, "A/B c"), selB);
+  // слот сравнения: галочка включает колонку, селект рядом (вне label, чтобы не переключал галку)
+  const mkSlot=(letter,set)=>{
+    const sel=modelSelect(letter==="B"?modelB:letter==="C"?modelC:modelD, set); sel.disabled=true;
+    const c=el("input",{type:"checkbox"}); c.onchange=()=>{ en[letter]=c.checked; sel.disabled=!c.checked; };
+    return el("span",{class:"tc-slot"}, el("label",{class:"tc-check"}, c, letter), sel);
+  };
+  const bar=el("div",{class:"tc-bar"},
+    el("span",{class:"muted small",text:"A:"}), selA,
+    mkSlot("B", v=>modelB=v), mkSlot("C", v=>modelC=v), mkSlot("D", v=>modelD=v));
   // тумблеры слоёв промпта (мгновенные per-call оверрайды, без сохранения)
   const tog={ soul:true, system_base:true, filter:true };
   const filterKeys=items.filter(i=>i.cat==="filter").map(i=>i.key);
@@ -444,15 +453,24 @@ function testChat(items){
     busy=true; send.disabled=true; inp.value="";
     const ov=overrides();
     log.append(el("div",{class:"msg user"}, el("div",{class:"r",text:"ты"}), q));
+    // активные колонки: A всегда + включённые B/C/D
+    const models=[["A",modelA]];
+    if(en.B) models.push(["B",modelB]);
+    if(en.C) models.push(["C",modelC]);
+    if(en.D) models.push(["D",modelD]);
     let aText="";
-    if(!ab){
+    if(models.length===1){
       const ans=el("div",{class:"msg assistant"}, el("div",{class:"r",text:modelLabel(modelA)})); const t=document.createTextNode(""); ans.append(t); log.append(ans); log.scrollTop=log.scrollHeight;
       aText=await streamInto(t,q,hist,modelA,log,ov);
     } else {
-      const colA=el("div",{class:"tc-col"}, el("div",{class:"h",text:modelLabel(modelA)})); const tA=document.createTextNode(""); colA.append(el("div",{class:"msg assistant"},tA));
-      const colB=el("div",{class:"tc-col"}, el("div",{class:"h",text:modelLabel(modelB)})); const tB=document.createTextNode(""); colB.append(el("div",{class:"msg assistant"},tB));
-      log.append(el("div",{class:"tc-cols"}, colA, colB)); log.scrollTop=log.scrollHeight;
-      const r=await Promise.all([streamInto(tA,q,hist,modelA,log,ov), streamInto(tB,q,hist,modelB,log,ov)]); aText=r[0];
+      const cols=models.map(([L,m])=>{
+        const col=el("div",{class:"tc-col"}, el("div",{class:"h",text:L+" · "+modelLabel(m)}));
+        const tn=document.createTextNode(""); col.append(el("div",{class:"msg assistant"},tn));
+        return {col,tn,m};
+      });
+      const wrap=el("div",{class:"tc-cols"}); cols.forEach(c=>wrap.append(c.col));
+      log.append(wrap); log.scrollTop=log.scrollHeight;
+      const r=await Promise.all(cols.map(c=>streamInto(c.tn,q,hist,c.m,log,ov))); aText=r[0];
     }
     hist.push({role:"user",content:q}); hist.push({role:"assistant",content:aText}); if(hist.length>20) hist.splice(0,hist.length-20);
     log.scrollTop=log.scrollHeight; busy=false; send.disabled=false; inp.focus();
