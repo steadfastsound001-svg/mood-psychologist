@@ -357,15 +357,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         acc = []
-        # голос чата: Sonnet пишет сразу, с полным контекстом (профиль+инсайты собрал DeepSeek).
-        # один проход — быстро. фон (портрет/итоги/инсайты) делает DeepSeek-v4-pro.
-        on, voice_model, _ = _humanize_cfg()
+        # ДВА АГЕНТА: 1) DeepSeek-аналитик собирает суть → 2) Sonnet-редактор чинит/доводит до голоса и стримит.
+        on, _editor_model, _ = _humanize_cfg()
+        cap = agent_config.cfg_int("chat_max_tokens", 400)
         try:
-            for delta in stream_completion_sync(
-                system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 400),
-                task="dialog", force=(voice_model if on else None),
-            ):
+            if on:
+                # агент 1 — DeepSeek (task=dialog → model_chat), полный контекст, не стримим клиенту
+                draft = "".join(stream_completion_sync(
+                    system=user_system(prof.get("compiled", ""), insights),
+                    messages=messages, max_tokens=cap, task="dialog",
+                )).strip()
+                # агент 2 — Sonnet-редактор: правит черновик с учётом реплики клиента, стримит
+                gen = humanize_stream(draft, user_msg=text, max_tokens=cap + 120)
+            else:
+                # один проход (DeepSeek) — быстрее, суше
+                gen = stream_completion_sync(
+                    system=user_system(prof.get("compiled", ""), insights),
+                    messages=messages, max_tokens=cap, task="dialog",
+                )
+            for delta in gen:
                 acc.append(delta)
                 try:
                     self.wfile.write(delta.encode("utf-8")); self.wfile.flush()

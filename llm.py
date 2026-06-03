@@ -124,37 +124,56 @@ agent_config.register("model_chat", os.environ.get("OPENAI_MODEL_FAST", "google/
 agent_config.register("model_deep", os.environ.get("OPENAI_MODEL", "google/gemini-3.1-pro-preview"),
                       "Модель: портрет · итоги · /ask", "Умная модель для портрета, итогов недели и /ask. «/» = OpenRouter.", "model", 2)
 
-# ───────────── двухпроходный голос: «мозг» (DeepSeek) → «голос» (Sonnet) ─────────────
-# DeepSeek даёт профессиональную суть, Sonnet переписывает в живую человеческую речь.
-HUMANIZER_PROMPT = (
-    "ты — голос психолога. на входе ЧЕРНОВИК ответа клиенту: по сути верный, но суховатый/машинный. "
-    "перепиши его как живой человек — тёплый, точный, с характером.\n\n"
-    "ЖЁСТКО:\n"
-    "— сохрани смысл, технику и фактуру черновика. НИЧЕГО не добавляй от себя: ни новых советов, ни новых вопросов, ни морали.\n"
-    "— голос: строчные буквы, рваный человеческий ритм, без воды и канцелярита.\n"
+# ───────────── два агента: «аналитик» (DeepSeek) → «редактор-голос» (Sonnet) ─────────────
+# Агент 1 (DeepSeek) силён в сути/анализе, но слаб в живом русском (кальки, канцелярит,
+# машинный ритм, лишняя структура). Агент 2 (Sonnet 4.6) закрывает эти слабости: правит и
+# доводит до голоса психолога ПО ТЕМ ЖЕ ИНСТРУКЦИЯМ (душа подмешивается в систему редактора).
+EDITOR_PROMPT = (
+    "роль: ты — редактор и финальный голос психолога. на входе РЕПЛИКА клиента и ЧЕРНОВИК ответа "
+    "от коллеги-аналитика. аналитик силён в сути и точно читает человека, но пишет суховато: кальки "
+    "с английского, канцелярит, лишняя структура и перечисления, машинный ритм, теряет тепло.\n\n"
+    "правила голоса — ВЫШЕ (в душе). работай строго по ним. твоя задача — выпустить ФИНАЛ клиенту: "
+    "та же суть и терапевтическая линия, но безупречный живой голос.\n\n"
+    "ЧТО ДЕЛАЕШЬ:\n"
+    "— сохраняешь смысл, технику и направление черновика. НЕ добавляешь новых советов, вопросов, морали, фактов.\n"
+    "— чинишь слабости аналитика: кальки, канцелярит, лишние списки/структуру, машинный ритм, обезличенность.\n"
+    "— доводишь до голоса: рваный человеческий ритм, тонкая меланхолия и достоинство, тепло без сюсюканья.\n"
+    "— ВСЕ буквы строчные, включая первую букву каждого предложения (кроме имён собственных и аббревиатур). это жёсткое правило, даже если в черновике с заглавных.\n"
+    "— СОХРАНЯЕШЬ ОСТРОТУ: если аналитик режет правду — НЕ смягчай её в вежливость. честность важнее комфорта. редактор не делает ответ беззубым.\n"
     "— под нож ИИ-маркеры: «является», «важно отметить», «по сути», «не просто X а Y», тройки-перечисления, дежурные «понимаю / я рядом / это нормально».\n"
-    "— тонкая меланхоличная интонация, достоинство, ноль коуч-пафоса, лести и эмодзи-заголовков.\n"
-    "— короче черновика, не длиннее. если в черновике вопрос — оставь один, самый точный.\n"
-    "— верни ТОЛЬКО переписанный ответ: без кавычек, без пояснений, без префиксов."
+    "— длина: как в правилах (реплика — 1-2 строки). если в черновике вопрос — оставь один, самый точный. финал не длиннее черновика.\n"
+    "— если в черновике логическая или фактическая нестыковка с репликой клиента — поправь молча.\n"
+    "— верни ТОЛЬКО финальный ответ клиенту: без кавычек, пояснений, префиксов, без пометок о редактуре."
 )
-agent_config.register("humanizer_prompt", HUMANIZER_PROMPT, "Очеловечиватель (Sonnet)",
-                      "Второй проход: Sonnet переписывает черновик DeepSeek в живой голос психолога. Не добавляет ничего нового.", "prompt", 8)
-agent_config.register("humanizer_model", "anthropic/claude-sonnet-4.6", "Модель: голос (humanizer)",
-                      "Кто очеловечивает сообщения и ревью. По умолчанию Claude Sonnet 4.6.", "model", 3)
-agent_config.register("humanize_on", "1", "Очеловечивание вкл (1/0)",
-                      "1 — сообщения психолога и ревью проходят второй проход через Sonnet. 0 — только DeepSeek.", "setting", 1)
+agent_config.register("humanizer_prompt", EDITOR_PROMPT, "Редактор-голос (2-й агент)",
+                      "Второй агент (Sonnet) правит черновик DeepSeek: чинит кальки/канцелярит/машинность, доводит до голоса, сохраняет остроту. Душа подмешивается автоматически.", "prompt", 8)
+agent_config.register("humanizer_model", "anthropic/claude-sonnet-4.6", "Модель: редактор-голос",
+                      "Кто правит сообщения и ревью (2-й агент). Sonnet 4.6 закрывает слабый русский DeepSeek. Альтернативы: claude-opus-4.x (мощнее, дороже), gpt-5.", "model", 3)
+agent_config.register("humanize_on", "1", "Редактор-голос вкл (1/0)",
+                      "1 — ответ психолога и ревью проходят 2-го агента (DeepSeek→Sonnet). 0 — только DeepSeek (быстрее, суше).", "setting", 1)
 
 
 def _humanize_models():
+    """(вкл, модель-редактор, система редактора = душа + рамка редактора)."""
     import agent_config
+    soul = agent_config.cfg("soul", "")
+    frame = agent_config.cfg("humanizer_prompt", EDITOR_PROMPT)
+    sys = (soul + "\n\n" + frame) if soul else frame   # «по тем же инструкциям» — душа внутри редактора
     return (agent_config.cfg("humanize_on", "1") == "1",
             agent_config.cfg("humanizer_model", "anthropic/claude-sonnet-4.6"),
-            agent_config.cfg("humanizer_prompt", HUMANIZER_PROMPT))
+            sys)
 
 
-def humanize_stream(draft: str, max_tokens: int = 600):
-    """Генератор: Sonnet переписывает черновик в живой голос, стримом.
-    Если очеловечивание выключено или Sonnet не стартовал — отдаём черновик как есть."""
+def _editor_input(draft: str, user_msg: str | None) -> str:
+    if user_msg:
+        return (f"[реплика клиента]\n{user_msg}\n\n"
+                f"[черновик ответа аналитика — отредактируй в финал]\n{draft}")
+    return f"[черновик — отредактируй в финал]\n{draft}"
+
+
+def humanize_stream(draft: str, user_msg: str | None = None, max_tokens: int = 600):
+    """Генератор: 2-й агент (Sonnet) правит черновик и стримит финал.
+    Выключено / агент не стартовал → отдаём черновик как есть (graceful)."""
     on, model, sys = _humanize_models()
     draft = (draft or "").strip()
     if not on or not draft:
@@ -162,13 +181,13 @@ def humanize_stream(draft: str, max_tokens: int = 600):
             yield draft
         return
     try:
-        gen = stream_completion_sync(system=sys, messages=[{"role": "user", "content": draft}],
+        gen = stream_completion_sync(system=sys, messages=[{"role": "user", "content": _editor_input(draft, user_msg)}],
                                      max_tokens=max_tokens, force=model)
-        first = next(gen)                 # тут всплывёт ошибка старта Sonnet
+        first = next(gen)                 # тут всплывёт ошибка старта редактора
     except StopIteration:
         yield draft; return
     except Exception:
-        yield draft; return               # Sonnet не ответил → черновик
+        yield draft; return               # редактор не ответил → черновик
     yield first
     try:
         for d in gen:
@@ -177,13 +196,13 @@ def humanize_stream(draft: str, max_tokens: int = 600):
         return                            # обрыв середины — оставляем что есть
 
 
-def humanize_text(draft: str, max_tokens: int = 600) -> str:
-    """Не-стрим версия для ревью (портрет/итоги/отклик): вернуть очеловеченный текст."""
+def humanize_text(draft: str, user_msg: str | None = None, max_tokens: int = 600) -> str:
+    """Не-стрим версия для ревью (итоги/отклик): вернуть отредактированный текст."""
     draft = (draft or "").strip()
     if not draft:
         return ""
     try:
-        out = "".join(humanize_stream(draft, max_tokens=max_tokens)).strip()
+        out = "".join(humanize_stream(draft, user_msg=user_msg, max_tokens=max_tokens)).strip()
         return out or draft
     except Exception:
         return draft
