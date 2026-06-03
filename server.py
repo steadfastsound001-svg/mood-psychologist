@@ -22,7 +22,7 @@ load_dotenv(ROOT / ".env", override=True)
 import store
 import onboarding
 import stt
-from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text
+from llm import Anthropic, stream_completion_sync, humanize_text, _humanize_models as _humanize_cfg
 from agent_core import user_system, ANTI_AI
 import agent_config
 
@@ -357,14 +357,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         acc = []
+        # голос чата: Sonnet пишет сразу, с полным контекстом (профиль+инсайты собрал DeepSeek).
+        # один проход — быстро. фон (портрет/итоги/инсайты) делает DeepSeek-v4-pro.
+        on, voice_model, _ = _humanize_cfg()
         try:
-            # 1) ЧЕРНОВИК — DeepSeek делает профессиональную суть (без стрима клиенту)
-            draft = "".join(stream_completion_sync(
+            for delta in stream_completion_sync(
                 system=user_system(prof.get("compiled", ""), insights),
-                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 400), task="dialog",
-            )).strip()
-            # 2) ГОЛОС — Sonnet переписывает в живую человеческую речь и стримит клиенту
-            for delta in humanize_stream(draft, max_tokens=agent_config.cfg_int("chat_max_tokens", 400) + 120):
+                messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 400),
+                task="dialog", force=(voice_model if on else None),
+            ):
                 acc.append(delta)
                 try:
                     self.wfile.write(delta.encode("utf-8")); self.wfile.flush()
