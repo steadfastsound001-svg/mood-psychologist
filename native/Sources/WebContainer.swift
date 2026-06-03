@@ -19,8 +19,10 @@ private let kUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
 /// общий конструктор webview + конфиг (хаптики, медиа, UA).
 func makeWebView(coordinator: WebCoordinator) -> WKWebView {
     let cfg = WKWebViewConfiguration()
-    cfg.allowsInlineMediaPlayback = true
+    #if os(iOS)
+    cfg.allowsInlineMediaPlayback = true                // iOS-only ключи
     cfg.mediaTypesRequiringUserActionForPlayback = []   // голосовые без лишнего тапа
+    #endif
 
     let ucc = WKUserContentController()
     for name in ["haptic", "hapticSel", "hapticOk"] {
