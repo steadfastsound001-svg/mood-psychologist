@@ -1,0 +1,7 @@
+# генерится из project.yml через xcodegen — в гит не кладём
+soul.xcodeproj/
+# сборки
+build/
+DerivedData/
+*.xcuserstate
+.DS_Store

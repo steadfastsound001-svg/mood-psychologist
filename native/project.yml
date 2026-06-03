@@ -1,0 +1,39 @@
+name: soul
+options:
+  bundleIdPrefix: app.soul
+  deploymentTarget:
+    iOS: "16.0"
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+
+targets:
+  soul:
+    type: application
+    # один таргет на обе платформы (Xcode 14+, мультиплатформенное приложение)
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - Sources
+      - Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.soul.client
+        PRODUCT_NAME: soul
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_PREVIEWS: YES
+        CODE_SIGN_STYLE: Automatic
+        # macOS: без App Sandbox для личного запуска (микрофон/сеть без лишних энтайтлментов)
+        ENABLE_HARDENED_RUNTIME: NO
+        SUPPORTS_MACCATALYST: NO
+        # ключи Info.plist (генерируемый plist):
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "голосовые заметки психологу — распознавание речи"
+        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.healthcare-fitness"
+        INFOPLIST_KEY_CFBundleDisplayName: soul

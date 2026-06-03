@@ -5,15 +5,24 @@ try { tg?.ready?.(); tg?.expand?.(); } catch (_) {}
 const $ = (id) => document.getElementById(id);
 // вне Telegram (установленная PWA / браузер) тактилки нет — пробуем navigator.vibrate (Android).
 const _canVibrate = () => { try { return !isInTelegram() && typeof navigator !== "undefined" && navigator.vibrate; } catch (_) { return false; } };
+// нативная обёртка (WKWebView на iOS/Mac) пробрасывает тактилку в CoreHaptics — это чинит
+// вибро в standalone iOS, где Vibration API нет. no-op в обычном Safari/PWA.
+const _nativeHaptic = (name, arg) => {
+  try { const h = window.webkit?.messageHandlers?.[name]; if (h) { h.postMessage(arg || ""); return true; } } catch (_) {}
+  return false;
+};
 const haptic = (k = "light") => {
+  if (_nativeHaptic("haptic", k)) return;
   try { tg?.HapticFeedback?.impactOccurred(k); } catch (_) {}
   try { if (_canVibrate()) navigator.vibrate(k === "heavy" ? 16 : k === "medium" ? 11 : 6); } catch (_) {}
 };
 const hapticSel = () => {
+  if (_nativeHaptic("hapticSel", "")) return;
   try { tg?.HapticFeedback?.selectionChanged(); } catch (_) {}
   try { if (_canVibrate()) navigator.vibrate(4); } catch (_) {}
 };
 const hapticOk = () => {
+  if (_nativeHaptic("hapticOk", "")) return;
   try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (_) {}
   try { if (_canVibrate()) navigator.vibrate([6, 30, 12]); } catch (_) {}
 };
