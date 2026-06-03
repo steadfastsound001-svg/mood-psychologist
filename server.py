@@ -22,7 +22,7 @@ load_dotenv(ROOT / ".env", override=True)
 import store
 import onboarding
 import stt
-from llm import Anthropic, stream_completion_sync
+from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text
 from agent_core import user_system, ANTI_AI
 import agent_config
 
@@ -358,10 +358,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         acc = []
         try:
-            for delta in stream_completion_sync(
+            # 1) ЧЕРНОВИК — DeepSeek делает профессиональную суть (без стрима клиенту)
+            draft = "".join(stream_completion_sync(
                 system=user_system(prof.get("compiled", ""), insights),
                 messages=messages, max_tokens=agent_config.cfg_int("chat_max_tokens", 400), task="dialog",
-            ):
+            )).strip()
+            # 2) ГОЛОС — Sonnet переписывает в живую человеческую речь и стримит клиенту
+            for delta in humanize_stream(draft, max_tokens=agent_config.cfg_int("chat_max_tokens", 400) + 120):
                 acc.append(delta)
                 try:
                     self.wfile.write(delta.encode("utf-8")); self.wfile.flush()
@@ -482,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
                 system=sys, messages=[{"role": "user", "content": blob}],
                 max_tokens=1000, task="reasoning",   # Pro: forced-reasoning ест часть бюджета
             )
-            return resp.content[0].text.strip()
+            return humanize_text(resp.content[0].text.strip(), max_tokens=1100)  # Sonnet → человечнее
         except Exception as e:
             return f"не удалось собрать: {e}"
 
@@ -524,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                 system=sys, messages=[{"role": "user", "content": text[:4000]}],
                 max_tokens=140, task="fast",
             )
-            return resp.content[0].text.strip()[:400]
+            return humanize_text(resp.content[0].text.strip(), max_tokens=200)[:400]  # Sonnet → человечнее
         except Exception:
             return ""
 

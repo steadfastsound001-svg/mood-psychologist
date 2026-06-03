@@ -124,6 +124,70 @@ agent_config.register("model_chat", os.environ.get("OPENAI_MODEL_FAST", "google/
 agent_config.register("model_deep", os.environ.get("OPENAI_MODEL", "google/gemini-3.1-pro-preview"),
                       "Модель: портрет · итоги · /ask", "Умная модель для портрета, итогов недели и /ask. «/» = OpenRouter.", "model", 2)
 
+# ───────────── двухпроходный голос: «мозг» (DeepSeek) → «голос» (Sonnet) ─────────────
+# DeepSeek даёт профессиональную суть, Sonnet переписывает в живую человеческую речь.
+HUMANIZER_PROMPT = (
+    "ты — голос психолога. на входе ЧЕРНОВИК ответа клиенту: по сути верный, но суховатый/машинный. "
+    "перепиши его как живой человек — тёплый, точный, с характером.\n\n"
+    "ЖЁСТКО:\n"
+    "— сохрани смысл, технику и фактуру черновика. НИЧЕГО не добавляй от себя: ни новых советов, ни новых вопросов, ни морали.\n"
+    "— голос: строчные буквы, рваный человеческий ритм, без воды и канцелярита.\n"
+    "— под нож ИИ-маркеры: «является», «важно отметить», «по сути», «не просто X а Y», тройки-перечисления, дежурные «понимаю / я рядом / это нормально».\n"
+    "— тонкая меланхоличная интонация, достоинство, ноль коуч-пафоса, лести и эмодзи-заголовков.\n"
+    "— короче черновика, не длиннее. если в черновике вопрос — оставь один, самый точный.\n"
+    "— верни ТОЛЬКО переписанный ответ: без кавычек, без пояснений, без префиксов."
+)
+agent_config.register("humanizer_prompt", HUMANIZER_PROMPT, "Очеловечиватель (Sonnet)",
+                      "Второй проход: Sonnet переписывает черновик DeepSeek в живой голос психолога. Не добавляет ничего нового.", "prompt", 8)
+agent_config.register("humanizer_model", "anthropic/claude-sonnet-4.6", "Модель: голос (humanizer)",
+                      "Кто очеловечивает сообщения и ревью. По умолчанию Claude Sonnet 4.6.", "model", 3)
+agent_config.register("humanize_on", "1", "Очеловечивание вкл (1/0)",
+                      "1 — сообщения психолога и ревью проходят второй проход через Sonnet. 0 — только DeepSeek.", "setting", 1)
+
+
+def _humanize_models():
+    import agent_config
+    return (agent_config.cfg("humanize_on", "1") == "1",
+            agent_config.cfg("humanizer_model", "anthropic/claude-sonnet-4.6"),
+            agent_config.cfg("humanizer_prompt", HUMANIZER_PROMPT))
+
+
+def humanize_stream(draft: str, max_tokens: int = 600):
+    """Генератор: Sonnet переписывает черновик в живой голос, стримом.
+    Если очеловечивание выключено или Sonnet не стартовал — отдаём черновик как есть."""
+    on, model, sys = _humanize_models()
+    draft = (draft or "").strip()
+    if not on or not draft:
+        if draft:
+            yield draft
+        return
+    try:
+        gen = stream_completion_sync(system=sys, messages=[{"role": "user", "content": draft}],
+                                     max_tokens=max_tokens, force=model)
+        first = next(gen)                 # тут всплывёт ошибка старта Sonnet
+    except StopIteration:
+        yield draft; return
+    except Exception:
+        yield draft; return               # Sonnet не ответил → черновик
+    yield first
+    try:
+        for d in gen:
+            yield d
+    except Exception:
+        return                            # обрыв середины — оставляем что есть
+
+
+def humanize_text(draft: str, max_tokens: int = 600) -> str:
+    """Не-стрим версия для ревью (портрет/итоги/отклик): вернуть очеловеченный текст."""
+    draft = (draft or "").strip()
+    if not draft:
+        return ""
+    try:
+        out = "".join(humanize_stream(draft, max_tokens=max_tokens)).strip()
+        return out or draft
+    except Exception:
+        return draft
+
 # (подстрока в имени модели) -> ключ конфига фильтра. порядок: специфичное раньше общего.
 _FILTER_KEYS = [
     ("gpt-5", "filter_gpt"), ("gpt-4", "filter_gpt"), ("gpt-oss", "filter_gpt"),
@@ -351,8 +415,10 @@ def stream_completion_sync(
     max_tokens: int = 220,
     model: str | None = None,
     task: str | None = None,
+    force: str | None = None,
 ):
-    """Синхронный генератор текстовых дельт (SSE), OpenAI→OpenRouter fallback по моделям."""
+    """Синхронный генератор текстовых дельт (SSE), OpenAI→OpenRouter fallback по моделям.
+    force — жёстко эта модель и только она (для humanizer-прохода Sonnet)."""
     sys_text = _flatten_system(system)
     chat = []
     if sys_text:
@@ -360,7 +426,7 @@ def stream_completion_sync(
     for m in messages or []:
         chat.append({"role": m.get("role", "user"), "content": _flatten_content(m.get("content", ""))})
 
-    models = _chain(task, model)
+    models = [force] if force else _chain(task, model)
     last_err: Exception | None = None
     for m in models:
         ph = _provider_headers(m, stream=True)
