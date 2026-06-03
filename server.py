@@ -554,7 +554,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/auth/google/enabled":
             self._json(200, {"enabled": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)}); return
         if p == "/api/auth/google":
-            self._google_redirect(); return
+            self._google_redirect(u); return
         if p == "/api/auth/google/callback":
             self._google_callback(u); return
         if p == "/api/onboarding/questions":
@@ -836,25 +836,38 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": str(e)})
 
     # ── google oauth ──
-    def _google_redirect(self):
+    def _google_redirect(self, u=None):
         if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
             self._json(400, {"error": "google не настроен"}); return
-        params = urlencode({
+        # вход из нативного приложения (?app=1) → state=app, токен вернём на soulauth://
+        app = ""
+        try:
+            app = parse_qs(u.query).get("app", [""])[0] if u is not None else ""
+        except Exception:
+            app = ""
+        p = {
             "client_id": GOOGLE_CLIENT_ID,
             "redirect_uri": self._base_url() + "/api/auth/google/callback",
             "response_type": "code",
             "scope": "openid email profile",
             "access_type": "online",
             "prompt": "select_account",
-        })
-        self._redirect("https://accounts.google.com/o/oauth2/v2/auth?" + params)
+        }
+        if app == "1":
+            p["state"] = "app"
+        self._redirect("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(p))
 
     def _google_callback(self, u):
         import httpx
-        code = parse_qs(u.query).get("code", [""])[0]
+        q = parse_qs(u.query)
+        code = q.get("code", [""])[0]
+        is_app = q.get("state", [""])[0] == "app"   # вход из нативного приложения
         base = self._base_url()
+        # куда вернуть: в приложение по custom-scheme или в веб
+        def dest(query):
+            return (f"soulauth://callback?{query}" if is_app else base + f"/?{query}")
         if not code:
-            self._redirect(base + "/?auth_error=1"); return
+            self._redirect(dest("auth_error=1")); return
         try:
             with httpx.Client(timeout=30) as cli:
                 tok = cli.post("https://oauth2.googleapis.com/token", data={
@@ -865,19 +878,19 @@ class Handler(BaseHTTPRequestHandler):
                 }).json()
                 access = tok.get("access_token")
                 if not access:
-                    self._redirect(base + "/?auth_error=token"); return
+                    self._redirect(dest("auth_error=token")); return
                 info = cli.get("https://www.googleapis.com/oauth2/v2/userinfo",
                                headers={"Authorization": "Bearer " + access}).json()
             email = info.get("email")
             if not email:
-                self._redirect(base + "/?auth_error=email"); return
+                self._redirect(dest("auth_error=email")); return
             user = store.get_or_create_oauth_user(email, info.get("name") or "")
             token = store.create_session(user["id"])
             prof = store.get_profile(user["id"])
-            self._redirect(base + f"/?token={token}&onb={1 if prof.get('onboarded') else 0}")
+            self._redirect(dest(f"token={token}&onb={1 if prof.get('onboarded') else 0}"))
         except Exception as e:
             print("google callback error:", e, flush=True)
-            self._redirect(base + "/?auth_error=server")
+            self._redirect(dest("auth_error=server"))
 
 
 def main():

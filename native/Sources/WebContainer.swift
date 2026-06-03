@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AuthenticationServices
 
 #if os(iOS)
 import UIKit
@@ -34,6 +35,7 @@ func makeWebView(coordinator: WebCoordinator) -> WKWebView {
     web.customUserAgent = kUserAgent
     web.navigationDelegate = coordinator
     web.uiDelegate = coordinator
+    coordinator.webView = web                           // для перезагрузки после google-входа
     web.allowsBackForwardNavigationGestures = true
     if #available(iOS 16.4, macOS 13.3, *) { web.isInspectable = true }   // Web Inspector в дебаге
 
@@ -78,7 +80,11 @@ struct WebContainer: NSViewRepresentable {
 
 // ───────── координатор: хаптики + навигация + JS-диалоги ─────────
 
-final class WebCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+final class WebCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate,
+                            ASWebAuthenticationPresentationContextProviding {
+
+    weak var webView: WKWebView?
+    private var authSession: ASWebAuthenticationSession?
 
     // JS → нативная тактилка
     func userContentController(_ ucc: WKUserContentController, didReceive msg: WKScriptMessage) {
@@ -111,11 +117,50 @@ final class WebCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelega
     // google oauth и переходы внутри нашего домена остаются в webview.
     func webView(_ web: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let u = action.request.url, let scheme = u.scheme?.lowercased(),
-           ["tel", "mailto", "facetime", "sms"].contains(scheme) {
-            openExternal(u); decisionHandler(.cancel); return
+        if let u = action.request.url {
+            // google-вход → системный браузер (ASWebAuthenticationSession), не в webview
+            if u.path == "/api/auth/google", (u.query?.contains("app=1") != true),
+               let scheme = u.scheme, let host = u.host {
+                startGoogleAuth(base: "\(scheme)://\(host)")
+                decisionHandler(.cancel); return
+            }
+            if let s = u.scheme?.lowercased(), ["tel", "mailto", "facetime", "sms"].contains(s) {
+                openExternal(u); decisionHandler(.cancel); return
+            }
         }
         decisionHandler(.allow)
+    }
+
+    // ── google-вход через системный Safari-шит; токен возвращается на soulauth:// ──
+    private func startGoogleAuth(base: String) {
+        guard let authURL = URL(string: base + "/api/auth/google?app=1") else { return }
+        let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: "soulauth") { [weak self] cb, _ in
+            guard let self = self, let cb = cb else { return }   // отмена/ошибка — остаёмся на входе
+            let items = URLComponents(url: cb, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let token = items.first { $0.name == "token" }?.value
+            let onb = items.first { $0.name == "onb" }?.value ?? "0"
+            if let token = token, !token.isEmpty {
+                var comps = URLComponents(string: base + "/")
+                comps?.queryItems = [URLQueryItem(name: "token", value: token),
+                                     URLQueryItem(name: "onb", value: onb)]
+                if let target = comps?.url { self.webView?.load(URLRequest(url: target)) }
+            } else if let home = URL(string: base) {
+                self.webView?.load(URLRequest(url: home))        // auth_error → назад на вход
+            }
+        }
+        session.presentationContextProvider = self
+        // prefersEphemeralWebSession по умолчанию false → cookie делятся с Safari, google не режет
+        authSession = session
+        session.start()
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        #if os(iOS)
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.flatMap { $0.windows }.first { $0.isKeyWindow } ?? ASPresentationAnchor()
+        #else
+        return webView?.window ?? NSApplication.shared.windows.first ?? ASPresentationAnchor()
+        #endif
     }
 
     // target=_blank / window.open → если нет целевого фрейма, открыть снаружи
