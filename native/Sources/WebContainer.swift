@@ -5,9 +5,11 @@ import AuthenticationServices
 #if os(iOS)
 import UIKit
 typealias PlatformView = UIView
+typealias PlatformColor = UIColor
 #elseif os(macOS)
 import AppKit
 typealias PlatformView = NSView
+typealias PlatformColor = NSColor
 #endif
 
 // realистичный Safari-UA: без него Google OAuth в WKWebView ловит "disallowed_useragent".
@@ -39,15 +41,17 @@ func makeWebView(coordinator: WebCoordinator) -> WKWebView {
     web.allowsBackForwardNavigationGestures = true
     if #available(iOS 16.4, macOS 13.3, *) { web.isInspectable = true }   // Web Inspector в дебаге
 
+    // тёмный фон под цвет --page-bg: без белой вспышки. НЕ делаем webview прозрачным —
+    // прозрачный WKWebView ломает backdrop-filter (стекло) на iOS → пустой экран.
+    let pageBG = PlatformColor(red: 0.055, green: 0.059, blue: 0.071, alpha: 1)
     #if os(iOS)
     web.scrollView.bounces = false                      // без резинового оверскролла
     web.scrollView.contentInsetAdjustmentBehavior = .never
     web.scrollView.showsVerticalScrollIndicator = false
-    web.isOpaque = false
-    web.backgroundColor = .clear
-    web.scrollView.backgroundColor = .clear
+    web.backgroundColor = pageBG
+    web.scrollView.backgroundColor = pageBG
     #else
-    web.setValue(false, forKey: "drawsBackground")      // прозрачный фон на macOS
+    web.layer?.backgroundColor = pageBG.cgColor
     #endif
     return web
 }
@@ -60,6 +64,7 @@ struct WebContainer: UIViewRepresentable {
     func makeCoordinator() -> WebCoordinator { WebCoordinator() }
     func makeUIView(context: Context) -> WKWebView {
         let web = makeWebView(coordinator: context.coordinator)
+        context.coordinator.targetURL = url
         web.load(URLRequest(url: url))
         return web
     }
@@ -71,6 +76,7 @@ struct WebContainer: NSViewRepresentable {
     func makeCoordinator() -> WebCoordinator { WebCoordinator() }
     func makeNSView(context: Context) -> WKWebView {
         let web = makeWebView(coordinator: context.coordinator)
+        context.coordinator.targetURL = url
         web.load(URLRequest(url: url))
         return web
     }
@@ -85,6 +91,31 @@ final class WebCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelega
 
     weak var webView: WKWebView?
     private var authSession: ASWebAuthenticationSession?
+    var targetURL: URL?                 // что грузим (для ретрая при обрыве сети)
+    private var loadRetries = 0
+    private let maxRetries = 8
+    private var watchdog: DispatchWorkItem?
+
+    // ретрай при обрыве (Render free рвёт коннект / cold start -1005/-1009)
+    private func retryLoad(_ web: WKWebView) {
+        guard loadRetries < maxRetries, let u = targetURL else { return }
+        loadRetries += 1
+        let delay = min(1.0 + Double(loadRetries) * 0.8, 5.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak web] in
+            web?.load(URLRequest(url: u))
+        }
+    }
+    // сторож: Render free может спать ~50с и просто не отвечать (provisional висит без ошибки)
+    private func armWatchdog(_ web: WKWebView) {
+        cancelWatchdog()
+        let item = DispatchWorkItem { [weak self, weak web] in
+            guard let self = self, let web = web else { return }
+            self.retryLoad(web)         // повисло без commit → перезагрузить (cap по maxRetries)
+        }
+        watchdog = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: item)
+    }
+    private func cancelWatchdog() { watchdog?.cancel(); watchdog = nil }
 
     // JS → нативная тактилка
     func userContentController(_ ucc: WKUserContentController, didReceive msg: WKScriptMessage) {
@@ -112,6 +143,25 @@ final class WebCoordinator: NSObject, WKScriptMessageHandler, WKNavigationDelega
     private func selection() { haptic(.alignment) }
     private func success()   { haptic(.levelChange) }
     #endif
+
+    func webView(_ web: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        armWatchdog(web)                // повисла загрузка дольше N сек → перезагрузка
+    }
+    func webView(_ web: WKWebView, didCommit navigation: WKNavigation!) {
+        cancelWatchdog()                // документ начал приходить — снимаем сторож
+    }
+    func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {
+        cancelWatchdog(); loadRetries = 0   // успех
+    }
+    func webView(_ web: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        cancelWatchdog(); retryLoad(web)    // обрыв на загрузке документа → перезагрузка
+    }
+    func webView(_ web: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        cancelWatchdog(); retryLoad(web)
+    }
+    func webViewWebContentProcessDidTerminate(_ web: WKWebView) {
+        if let u = targetURL { web.load(URLRequest(url: u)) }   // процесс рендера упал → перезагрузить
+    }
 
     // внешние ссылки (tel/mailto/новое окно на чужой домен) → системный браузер.
     // google oauth и переходы внутри нашего домена остаются в webview.
