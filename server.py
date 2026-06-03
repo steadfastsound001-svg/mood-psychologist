@@ -22,7 +22,7 @@ load_dotenv(ROOT / ".env", override=True)
 import store
 import onboarding
 import stt
-from llm import Anthropic, stream_completion_sync, humanize_text, _humanize_models as _humanize_cfg
+from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text, _humanize_models as _humanize_cfg
 from agent_core import user_system, ANTI_AI
 import agent_config
 
