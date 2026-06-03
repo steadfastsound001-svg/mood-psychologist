@@ -37,3 +37,7 @@ targets:
         INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.healthcare-fitness"
         INFOPLIST_KEY_CFBundleDisplayName: soul
+        # App Store: не использует нестандартную криптографию → не требует экспортного согласия
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        # только портрет на iPhone (приложение вертикальное)
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
