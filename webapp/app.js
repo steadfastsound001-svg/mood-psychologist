@@ -615,14 +615,13 @@ function setupSwipe() {
 let chatPollTimer = null;
 function startChatPoll() {
   if (chatPollTimer) return;
-  const sig = (a) => JSON.stringify(a.map((m) => [m.role, m.text]));
   chatPollTimer = setInterval(async () => {
     if (curView !== "chat" || streaming || document.hidden) return;
     try {
       const r = await api("/api/v2/messages");
       if (!r || !Array.isArray(r.messages)) return;
       const h = r.messages.map((m) => ({ role: m.role === "user" ? "user" : "agent", text: m.content }));
-      if (h.length && sig(h) !== sig(loadChat())) { saveChat(h); chatRender(); }   // сервер опередил (напр. из ТГ)
+      if (h.length && reconcileChat(h)) chatRender();   // принять только если сервер впереди
     } catch (_) {}
   }, 6000);
 }
@@ -637,8 +636,7 @@ async function hydrateChat() {
   if (streaming) return;
   if (r && Array.isArray(r.messages)) {
     const h = r.messages.map((m) => ({ role: m.role === "user" ? "user" : "agent", text: m.content }));
-    saveChat(h);
-    chatRender();
+    if (reconcileChat(h)) chatRender();    // не теряем локальный хвост (свежие/в процессе)
   }
   if (!loadChat().length) maybeOpener();
 }
@@ -647,6 +645,26 @@ async function hydrateChat() {
 const CHAT_KEY = () => "mood_chat_" + (window.__me?.id || "x");
 function loadChat() { try { return JSON.parse(localStorage.getItem(CHAT_KEY()) || "[]"); } catch (_) { return []; } }
 function saveChat(a) { try { localStorage.setItem(CHAT_KEY(), JSON.stringify(a.slice(-100))); } catch (_) {} }
+
+/* сверка с серверным каноном БЕЗ потери локального хвоста.
+   сервер пишет ответ в БД только после полного ответа (~10с) — до этого наше свежее
+   сообщение есть только локально. слепой overwrite его стирал → «сбилось, потом появилось».
+   принимаем сервер ТОЛЬКО если он впереди (содержит локалку как префикс). */
+const _chatSig = (a) => JSON.stringify((a || []).map((m) => [m.role, m.text]));
+function _chatIsPrefix(a, b) { return a.length <= b.length && _chatSig(a) === _chatSig(b.slice(0, a.length)); }
+function reconcileChat(serverArr) {
+  const local = loadChat();
+  if (_chatSig(serverArr) === _chatSig(local)) return false;     // совпало
+  if (_chatIsPrefix(serverArr, local)) return false;             // локалка впереди (pending/fail) — не трогаем
+  if (_chatIsPrefix(local, serverArr)) { saveChat(serverArr); return true; }  // сервер впереди — принять (напр. из ТГ)
+  // расхождение в середине (кросс-девайс) → берём сервер, но не теряем незавершённый локальный user-хвост
+  let i = local.length - 1;
+  if (i >= 0 && local[i].role === "agent" && !(local[i].text || "").trim()) i--;  // пропустить пустой стрим-агент
+  const tail = [];
+  for (; i >= 0 && local[i].role === "user"; i--) tail.unshift(local[i]);
+  saveChat(serverArr.concat(tail));
+  return true;
+}
 
 /* лайк/дизлайк на ответ психолога — агент учится: 👍 делает так больше, 👎 меняет подход */
 function msgReactKey(text) {
@@ -1181,7 +1199,7 @@ async function sendMessage() {
     agentEl.classList.remove("streaming");
     streaming = false; hapticOk();
     const f = loadChat();
-    f[f.length - 1].text = acc || "(пусто)";
+    f[f.length - 1].text = (acc || "(пусто)").trim();   // как сервер (strip) → poll не перерисует зря
     saveChat(f);
     agentEl.dataset.full = (acc || "").replace(/\*\*/g, "");
     if (acc && acc.trim()) addFeedback(agentEl, acc);   // 👍/👎 сразу на свежий ответ
