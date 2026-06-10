@@ -22,7 +22,7 @@ load_dotenv(ROOT / ".env", override=True)
 import store
 import onboarding
 import stt
-from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text, _humanize_models as _humanize_cfg
+from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text, trim_incomplete, sentence_guard, _humanize_models as _humanize_cfg
 from agent_core import user_system, ANTI_AI
 import agent_config
 
@@ -359,23 +359,23 @@ class Handler(BaseHTTPRequestHandler):
         acc = []
         # ДВА АГЕНТА: 1) DeepSeek-аналитик собирает суть → 2) Sonnet-редактор чинит/доводит до голоса и стримит.
         on, _editor_model, _ = _humanize_cfg()
-        cap = agent_config.cfg_int("chat_max_tokens", 400)
+        cap = agent_config.cfg_int("chat_max_tokens", 700)
         try:
             if on:
-                # агент 1 — DeepSeek (task=dialog → model_chat), полный контекст, не стримим клиенту
-                draft = "".join(stream_completion_sync(
+                # агент 1 — аналитик (task=dialog → model_chat), полный контекст, не стримим клиенту
+                draft = trim_incomplete("".join(stream_completion_sync(
                     system=user_system(prof.get("compiled", ""), insights),
                     messages=messages, max_tokens=cap, task="dialog",
-                )).strip()
+                )).strip())
                 # агент 2 — Sonnet-редактор: правит черновик с учётом реплики клиента, стримит
-                gen = humanize_stream(draft, user_msg=text, max_tokens=cap + 120)
+                gen = humanize_stream(draft, user_msg=text, max_tokens=cap + 200)
             else:
-                # один проход (DeepSeek) — быстрее, суше
+                # один проход — быстрее, суше
                 gen = stream_completion_sync(
                     system=user_system(prof.get("compiled", ""), insights),
                     messages=messages, max_tokens=cap, task="dialog",
                 )
-            for delta in gen:
+            for delta in sentence_guard(gen):
                 acc.append(delta)
                 try:
                     self.wfile.write(delta.encode("utf-8")); self.wfile.flush()
@@ -414,11 +414,8 @@ class Handler(BaseHTTPRequestHandler):
             agent_config.set_overrides(ov)
         else:
             agent_config.clear_overrides()
-        try:
-            sys_blocks = user_system(prof.get("compiled", ""), insights)
-            max_tok = agent_config.cfg_int("chat_max_tokens", 400)
-        except Exception:
-            sys_blocks, max_tok = user_system(prof.get("compiled", ""), insights), 150
+        sys_blocks = user_system(prof.get("compiled", ""), insights)
+        max_tok = agent_config.cfg_int("chat_max_tokens", 700)
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -477,9 +474,9 @@ class Handler(BaseHTTPRequestHandler):
             resp = client.messages.create(
                 system=sys,
                 messages=[{"role": "user", "content": f"[служебное: сгенерируй ТОЛЬКО первую реплику-открытие, 1 строка. {hint}]"}],
-                max_tokens=80, task="dialog",
+                max_tokens=120, task="dialog",
             )
-            return resp.content[0].text.strip()
+            return trim_incomplete(resp.content[0].text.strip())
         except Exception:
             return "с чего начнём сегодня?"
 
@@ -536,9 +533,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": text[:4000]}],
-                max_tokens=140, task="fast",
+                max_tokens=220, task="fast",
             )
-            return humanize_text(resp.content[0].text.strip(), max_tokens=200)[:400]  # Sonnet → человечнее
+            return trim_incomplete(humanize_text(resp.content[0].text.strip(), max_tokens=300)[:400])  # Sonnet → человечнее
         except Exception:
             return ""
 

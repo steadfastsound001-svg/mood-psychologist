@@ -28,7 +28,7 @@ MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 import certifi
 from dotenv import load_dotenv
 
-from llm import Anthropic, stream_completion  # OpenRouter-обёртка
+from llm import Anthropic, stream_completion, trim_incomplete  # OpenRouter-обёртка
 from retriever import retrieve_context  # BM25 RAG по дневнику
 import store  # multi-tenant SQLite (веб/PWA)
 import onboarding  # онбординг-тест + компиляция профиля
@@ -168,6 +168,7 @@ CUTTING-EDGE (Tier 1 RCT 2015-2025): EMDR / Brainspotting — переработ
 
 наставник. сухой, плотный, без лишнего слова. говоришь как человек который видел много и знает цену словам.
 
+— наставник, не прокурор: ты ЗА ваню и веришь в его силы. строгость допустима только на фундаменте принятия — сначала ваня чувствует, что ты на его стороне, потом всё остальное.
 — строчные. без мата (ваня материт — ты нет).
 — называешь чувства точно, но бережно: перфекционизм, бегство, стыд — мягко, как то, что заметил, а не как приговор.
 — не анестезируешь ложью — и не режешь по-живому. правду подаёшь тонко, оставляя человеку воздух.
@@ -189,8 +190,9 @@ CUTTING-EDGE (Tier 1 RCT 2015-2025): EMDR / Brainspotting — переработ
 ты заинтересованный наставник, не справочное бюро. твоя работа — узнать ваню глубже, а не отделаться советом. но и не превратиться в допрос.
 
 ритм:
+— БОЛЬШИНСТВО ходов заканчивай ОДНИМ коротким вопросом — вопрос двигает разговор и отдаёт ход ване. реплика без вопроса и без конкретного шага — провал.
 — на коротких/неконкретных репликах задавай ОДИН точный углубляющий вопрос. один.
-— через 2-3 углубляющих вопроса ОБЯЗАТЕЛЬНО ставь точку: точное наблюдение, резюме того что увидел, или один конкретный шаг. дальше распрашивать — значит душить.
+— через 2-3 углубляющих вопроса подряд ставь точку: точное наблюдение, резюме того что увидел, или один конкретный шаг. дальше распрашивать — значит душить. после точки следующий ход — снова вопрос.
 — если ваня уже дал тебе достаточно — не задавай ещё, формулируй увиденное.
 — технику предлагаешь ТОЛЬКО если: (а) ваня сам просит, (б) острое состояние, (в) ты уже собрал контекст и понял где режет.
 — ЗАПРЕЩЕНО без явной причины предлагать: «выпиши слова», «представь себя через N лет», «дай себе X минут», «составь список из N пунктов». это шаблоны.
@@ -343,6 +345,20 @@ def write_jsonl(user_text: str, reply: str, kind: str = "text") -> None:
     }
     with LOG_PATH.open("a") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _mark_diary_pushed(entry_id) -> None:
+    """Помечаем запись дневника как уже выгруженную в Apple Notes (бот пишет её сам,
+    с разбором), чтобы applenotes_sync push не создал дубль."""
+    state_path = ROOT / "tools" / ".notes_sync_state.json"
+    try:
+        state = json.loads(state_path.read_text()) if state_path.exists() else {}
+    except Exception:
+        state = {}
+    ids = set(state.get("pushed_ids", []))
+    ids.add(str(entry_id))
+    state["pushed_ids"] = sorted(ids)
+    state_path.write_text(json.dumps(state, ensure_ascii=False))
 
 
 def write_apple_notes(user_text: str, reply: str) -> None:
@@ -572,7 +588,8 @@ async def stream_reply(
             if (now - last_edit_at) >= STREAM_EDIT_INTERVAL and len(full) - len(last_edited_text) >= STREAM_EDIT_MIN_CHARS:
                 await push(full)
                 last_edit_at = now
-        # финал
+        # финал: недописанный хвост (упёрся в max_tokens) срезаем до целого предложения
+        full = trim_incomplete(full)
         await push(full, final=True)
     except Exception as e:
         await push(full + f"\n\n[обрыв стрима: {e}]" if full else f"сломалось: {e}")
@@ -622,7 +639,7 @@ def ask_claude(user_text: str, mode: str = "entry", user_id: int = 0) -> str:
         system=cached_system(),
         messages=messages,
     )
-    reply = sanitize_md(resp.content[0].text)
+    reply = trim_incomplete(sanitize_md(resp.content[0].text))
 
     history.append({"role": "user", "content": user_msg})
     history.append({"role": "assistant", "content": reply})
@@ -1054,10 +1071,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 resp = client.messages.create(
                     system=user_system(prof.get("compiled", "")),
                     messages=messages,
-                    max_tokens=130,
+                    max_tokens=320,
                     task="dialog",
                 )
-                reply = resp.content[0].text
+                reply = trim_incomplete(resp.content[0].text)
                 store.add_message(uid, "user", text)
                 store.add_message(uid, "assistant", reply)
                 self._send_json(200, {"reply": reply})
@@ -1099,7 +1116,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 async for delta in stream_completion(
                     system=cached_system(),
                     messages=messages,
-                    max_tokens=110,
+                    max_tokens=320,
                     task="dialog",
                 ):
                     full += delta
@@ -1189,10 +1206,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 resp = client.messages.create(
                     system=cached_system(),
                     messages=messages,
-                    max_tokens=110,
+                    max_tokens=320,
                     task="dialog",
                 )
-                reply = resp.content[0].text
+                reply = trim_incomplete(resp.content[0].text)
                 hist = DIALOG_HISTORY.setdefault(USER_ID, [])
                 hist.append({"role": "user", "content": user_msg})
                 hist.append({"role": "assistant", "content": reply})
@@ -1315,7 +1332,7 @@ async def cmd_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             pass
     await update.message.reply_text(
         "на связи. пиши или диктуй голосовое — про день, про эмоции, или просто поговорить.\n\n"
-        "ежедневные чекины: 09:00 утром, 22:00 вечером\n\n"
+        "ежедневный чекин: 22:00 вечером\n\n"
         "команды:\n"
         "/template — шаблон для дневника\n"
         "/morning — утренний чек-ин\n"
@@ -1343,7 +1360,7 @@ async def _process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
 
         # Редактируем отчёт параллельно стриму
         edited_task = loop.run_in_executor(None, edit_entry, text) if is_report else None
-        reply = await stream_reply(update, context, prompt_text, mode="entry", max_tokens=110, task="dialog")
+        reply = await stream_reply(update, context, prompt_text, mode="entry", max_tokens=320, task="dialog")
         edited = await edited_task if edited_task else text
 
         write_jsonl(text, reply or "", kind=kind)
@@ -1354,6 +1371,11 @@ async def _process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
             store.add_message(uid, "user", text)
             if reply:
                 store.add_message(uid, "assistant", reply)
+            if is_report:
+                # длинная запись = дневник: появляется во вкладке «дневник» приложения
+                d = store.add_diary_entry(uid, edited or text, raw=text)
+                if d.get("id") is not None:
+                    _mark_diary_pushed(d["id"])  # в Notes её пишет сам бот (с разбором) — без дублей от sync push
         except Exception as e:
             print(f"[sync] не записал в store: {e}", flush=True)
         if is_report and reply:
@@ -1793,7 +1815,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.job_queue.run_daily(evening_ping, time=time(hour=22, minute=0, tzinfo=MOSCOW_TZ))
-    app.job_queue.run_daily(morning_ping, time=time(hour=9, minute=0, tzinfo=MOSCOW_TZ))
+    # утренний пинг отключён по просьбе вани (команда /morning остаётся доступной вручную)
 
     async def _diary_to_notes(context):
         """Записи дневника владельца из веб-приложения → Apple Notes. launchd на ~/Desktop
