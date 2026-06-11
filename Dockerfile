@@ -3,7 +3,8 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --timeout/--retries: PyPI с раннеров Render периодически отваливается по read timeout
+RUN pip install --no-cache-dir --timeout 60 --retries 10 -r requirements.txt
 
 COPY server.py store.py onboarding.py llm.py agent_core.py agent_config.py stt.py ./
 COPY SOUL.md ./
