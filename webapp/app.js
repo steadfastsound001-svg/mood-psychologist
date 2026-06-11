@@ -331,7 +331,7 @@ function maybeOfferLock() {
   try { if (localStorage.getItem("mood_lock_offered")) return; localStorage.setItem("mood_lock_offered", "1"); } catch (_) { return; }
   setTimeout(async () => {
     const face = await faceAvailable();
-    if (confirm(face ? "Защитить вход по Face ID?" : "Защитить вход кодом?")) offerLockSetup();
+    if (confirm(t(face ? "Защитить вход по Face ID?" : "Защитить вход кодом?"))) offerLockSetup();
   }, 900);
 }
 function setupLockUI() {
@@ -341,7 +341,7 @@ function setupLockUI() {
   btn.onclick = async () => {
     haptic("medium");
     if (lockEnabled()) {
-      if (!confirm("Защита включена. Выключить?")) return;
+      if (!confirm(t("Защита включена. Выключить?"))) return;
       const ok = await showLock("unlock");
       if (ok) { localStorage.removeItem(LOCK_PIN); localStorage.removeItem(LOCK_FACE); lockStateText(); }
       return;
@@ -916,7 +916,7 @@ function renderDiary(entries, force) {
     el.className = "diary-entry";
     el.dataset.copy = e.text || "";            // для удержания→копирования (только моя запись)
     const d = new Date((e.ts || 0) * 1000);
-    const date = isNaN(d) ? "" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+    const date = isNaN(d) ? "" : d.toLocaleDateString(window.APP_LANG === "en" ? "en-US" : "ru-RU", { day: "numeric", month: "long", year: "numeric" });
     const sym = moodSymbolForTs(e.ts);
     const editing = diaryEditId === e.id;
     el.innerHTML = `
@@ -1387,7 +1387,15 @@ async function doPulse(n) {
   } catch (e) { console.warn("pulse:", e); }
 }
 
-const MOOD_EXPLAIN = `**как считается оценка MOOD**
+const MOOD_EXPLAIN = window.APP_LANG === "en" ? `**how the MOOD score works**
+
+a stable 0–100 index. it adapts to you and is built from two parts:
+
+**baseline** — your test answers. validated scales of world psychology: emotional stability (neuroticism, Big Five), attachment anxiety, self-worth, emotion regulation, perceived stress and control, distress tolerance.
+
+**current state** — what the psychologist sees in your **diary** and **your conversations** over the last days.
+
+both parts average into one score. the more tests, entries and talks — the more precise it gets, and the more it adapts to you. higher — more inner ground. too little data — no score shown.` : `**как считается оценка MOOD**
 
 устойчивый индекс 0–100. подстраивается под тебя и складывается из двух частей:
 
@@ -1501,7 +1509,7 @@ function renderTests(s) {
   const ob = document.createElement("button");
   ob.className = "test-item" + (obDone ? " done" : "");
   ob.innerHTML = `<span class="test-emoji">${obDone ? "◆" : "◇"}</span><span class="test-title">первичный тест о тебе</span><span class="test-state">${obDone ? "пройден" : "пройти →"}</span>`;
-  ob.onclick = () => { haptic(); if (obDone && !confirm("Тест уже пройден. Пройти заново?")) return; startOnboardingAgain(); };
+  ob.onclick = () => { haptic(); if (obDone && !confirm(t("Тест уже пройден. Пройти заново?"))) return; startOnboardingAgain(); };
   box.appendChild(ob);
   if (!extraTests.length) return;
   extraTests.forEach((t) => {
@@ -1509,7 +1517,7 @@ function renderTests(s) {
     const el = document.createElement("button");
     el.className = "test-item" + (done ? " done" : "");
     el.innerHTML = `<span class="test-emoji">${done ? "◆" : "◇"}</span><span class="test-title">${t.title}</span><span class="test-state">${done ? "пройден" : "пройти →"}</span>`;
-    el.onclick = () => { haptic(); if (done && !confirm("Тест уже пройден. Пройти заново?")) return; openTest(t); };
+    el.onclick = () => { haptic(); if (done && !confirm(t("Тест уже пройден. Пройти заново?"))) return; openTest(t); };
     box.appendChild(el);
   });
 }
@@ -1602,20 +1610,20 @@ async function exportPortrait() {
   ctx.fillStyle = "#c0a080"; ctx.font = "700 56px 'Space Grotesk', sans-serif";
   ctx.fillText("◆ soul", pad, pad + 50);
   ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "400 28px Inter, sans-serif";
-  ctx.fillText("твой психологический портрет", pad, pad + 95);
+  ctx.fillText(t("твой психологический портрет"), pad, pad + 95);
   // текст
   ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = `${fs}px Inter, sans-serif`;
   let y = pad + 200;
   for (const ln of lines) { ctx.fillText(ln, pad, y); y += lh; }
   // подвал
   ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "400 24px Inter, sans-serif";
-  ctx.fillText("soul — личный психолог в кармане", pad, H - pad + 20);
+  ctx.fillText(t("soul — личный психолог в кармане"), pad, H - pad + 20);
 
   const blob = await new Promise((r) => cv.toBlob(r, "image/png"));
   if (!blob) return;
   const file = new File([blob], "mood-portrait.png", { type: "image/png" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: "Мой портрет MOOD" }); hapticOk(); return; } catch (_) {}
+    try { await navigator.share({ files: [file], title: t("Мой портрет MOOD") }); hapticOk(); return; } catch (_) {}
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = "mood-portrait.png"; a.click();

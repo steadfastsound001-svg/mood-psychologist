@@ -287,8 +287,20 @@ class Handler(BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", ct)
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
+        if path.suffix in (".png", ".jpg", ".jpeg", ".woff", ".woff2", ".ico"):
+            # картинки/шрифты не меняются — браузеру можно держать сутки
+            self.send_header("Cache-Control", "public, max-age=86400")
+        else:
+            # код подключается с ?v=N, но сам файл не кэшируем — никакого залипания
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+        # gzip для текстовых ответов: app.js 90КБ → ~25КБ, заметно на холодном старте
+        if path.suffix in (".js", ".css", ".html", ".svg", ".json") and len(data) > 1024 \
+                and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            import gzip as _gz
+            data = _gz.compress(data, 6)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

@@ -237,6 +237,8 @@
       <div class="prof-row"><span class="prof-k">имя</span><span class="prof-v" id="profName">—</span></div>
       <div class="prof-row"><span class="prof-k">email</span><span class="prof-v" id="profEmail">—</span></div>
       <div class="prof-row"><span class="prof-k">защита входа</span><span class="prof-v" id="lockState">выключена</span></div>
+      <div class="prof-row"><span class="prof-k">язык</span><span class="prof-v" id="langState">русский</span></div>
+      <button class="btn-ghost full" id="langBtn" style="margin-top:10px">switch to English</button>
       <button class="btn-ghost full" id="lockBtn" style="margin-top:10px">поставить код / Face ID</button>
       <button class="btn-ghost full" id="logoutBtn" style="margin-top:10px">выйти</button>
     </section>
@@ -315,6 +317,7 @@
     caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
-<script src="/app.js?v=53"></script>
+<script src="/i18n.js?v=1"></script>
+<script src="/app.js?v=54"></script>
 </body>
 </html>

@@ -329,6 +329,11 @@ def _is_reasoning_openai(model: str) -> bool:
             or m.startswith("o3") or m.startswith("o4") or m.startswith("o5"))
 
 
+# OpenRouter-модели с reasoning: размышление тратится ИЗ max_tokens → видимый ответ
+# обрезается на полуслове, если не дать резерв. Подстроки в имени модели.
+_REASONING_OR = ("deepseek-v4", "deepseek-r1", "gemini-3.1-pro", "thinking", "gpt-5", "o3-", "o4-")
+
+
 def _token_body(model: str, max_tokens: int) -> dict:
     """Reasoning-модели хотят max_completion_tokens (+бюджет на reasoning) и reasoning_effort.
     Остальные — обычный max_tokens. minimal по умолчанию: для чата-психолога reasoning не нужен."""
@@ -338,6 +343,11 @@ def _token_body(model: str, max_tokens: int) -> dict:
         if eff:
             body["reasoning_effort"] = eff
         return body
+    m = model.lower()
+    if "/" in model and any(s in m for s in _REASONING_OR):
+        # резерв на размышление + просим минимум усилий (OpenRouter unified reasoning param;
+        # провайдеры без поддержки игнорируют)
+        return {"max_tokens": max_tokens + 800, "reasoning": {"effort": "low"}}
     return {"max_tokens": max_tokens}
 
 

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "soul-server",
+      "runtimeExecutable": "/tmp/sv/bin/python",
+      "runtimeArgs": ["server.py"],
+      "port": 8080,
+      "env": { "PORT": "8080" }
+    }
+  ]
+}
