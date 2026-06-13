@@ -67,9 +67,10 @@
   --r-lg: 22px;
   --r-xl: 28px;
 
-  /* Fonts — современный sans для UI, serif для дневника/портрета */
+  /* Fonts — Manrope для UI-текста, Fraunces (литературный serif с оптикой) для заголовков/чисел,
+     Lora для длинного чтения (дневник/портрет). серифный дисплей даёт «душевность» и характер. */
   --font-body: "Manrope", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --font-display: "Manrope", "Space Grotesk", sans-serif;
+  --font-display: "Fraunces", "Lora", Georgia, "Times New Roman", serif;
   --font-serif: "Lora", Georgia, "Times New Roman", serif;
 
   --page-bg:
@@ -126,9 +127,13 @@ html, body {
   font-family: var(--font-body);
   transition: background 0.5s ease, color 0.3s ease;
   font-size: var(--t-body);
-  line-height: 1.4;
+  line-height: 1.47;
   letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  font-optical-sizing: auto;
   min-height: 100vh;
   background-attachment: fixed;
 }
@@ -150,9 +155,10 @@ html, body {
 }
 .page-title {
   font-family: var(--font-display);
-  font-size: var(--t-title-3);
-  font-weight: 700;
-  letter-spacing: 4px;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  font-variation-settings: "SOFT" 30, "opsz" 144;
   color: var(--text);
 }
 
@@ -741,7 +747,8 @@ canvas { display: block; max-width: 100%; }
   animation: splashPulse 1.8s ease-in-out infinite;
 }
 .splash-word {
-  font-family: var(--font-display); font-weight: 700; letter-spacing: 8px;
+  font-family: var(--font-display); font-weight: 600; letter-spacing: 4px;
+  font-variation-settings: "SOFT" 40, "opsz" 144;
   font-size: 22px; color: var(--text); padding-left: 8px;
 }
 .splash-spin {
@@ -950,7 +957,7 @@ canvas { display: block; max-width: 100%; }
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 0 16px rgba(var(--accent-rgb),0.5));
 }
-.auth-title { font-family: var(--font-display); font-size: 30px; font-weight: 700; text-align: center; letter-spacing: 6px; }
+.auth-title { font-family: var(--font-display); font-size: 32px; font-weight: 600; text-align: center; letter-spacing: 3px; font-variation-settings: "SOFT" 50, "opsz" 144; }
 .auth-sub { font-size: 13px; color: var(--hint); text-align: center; margin-bottom: 12px; }
 .auth-error { color: var(--ring-bad); font-size: 13px; text-align: center; }
 .auth-switch { text-align: center; font-size: 13px; color: var(--hint); margin-top: 4px; }
@@ -1157,7 +1164,7 @@ body.has-cursor .cursor-dot, body.has-cursor .cursor-ring {
 /* ── карточки чуть компактнее, симметрия ── */
 .profile-view { max-width: 560px; margin: 0 auto; }
 .card { padding: var(--s-4) var(--s-5); }
-.card h3 { font-family: var(--font-display); letter-spacing: 2px; }
+.card h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.3px; font-variation-settings: "SOFT" 30; }
 .card-note { font-size: var(--t-footnote); color: var(--hint); margin: -2px 0 4px; line-height: 1.4; }
 
 /* ── портрет: читаемое форматирование ── */
