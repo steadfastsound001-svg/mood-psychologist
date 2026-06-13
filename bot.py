@@ -28,7 +28,8 @@ MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 import certifi
 from dotenv import load_dotenv
 
-from llm import Anthropic, stream_completion, trim_incomplete  # OpenRouter-обёртка
+from llm import Anthropic, stream_completion, trim_incomplete, humanize_text  # OpenRouter-обёртка
+import agent_core  # регистрирует soul/system_base/humanizer в agent_config → редактор-голос знает «душу»
 from retriever import retrieve_context  # BM25 RAG по дневнику
 import store  # multi-tenant SQLite (веб/PWA)
 import onboarding  # онбординг-тест + компиляция профиля
@@ -590,6 +591,17 @@ async def stream_reply(
                 last_edit_at = now
         # финал: недописанный хвост (упёрся в max_tokens) срезаем до целого предложения
         full = trim_incomplete(full)
+        # 2-й агент (Sonnet-редактор): тот же путь, что на вебаппе — смягчает тон, чинит
+        # кальки/машинность, доводит до голоса. только живой диалог (entry/ask), не разборы.
+        if mode in ("entry", "ask") and full.strip():
+            try:
+                loop = asyncio.get_event_loop()
+                edited = await loop.run_in_executor(
+                    None, lambda: humanize_text(full, user_msg, max_tokens + 200))
+                if edited and edited.strip():
+                    full = trim_incomplete(edited)
+            except Exception:
+                pass  # редактор не ответил → оставляем черновик
         await push(full, final=True)
     except Exception as e:
         await push(full + f"\n\n[обрыв стрима: {e}]" if full else f"сломалось: {e}")
@@ -1311,7 +1323,13 @@ def start_web_server() -> None:
         print("[web] sqlite готова", flush=True)
     except Exception as e:
         print(f"[web] sqlite init failed: {e}", flush=True)
-    server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), WebHandler)
+    # порт занят прежним инстансом → НЕ роняем бота: Telegram-поллинг важнее Mini App.
+    try:
+        ThreadingHTTPServer.allow_reuse_address = True
+        server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), WebHandler)
+    except OSError as e:
+        print(f"[web] порт {WEB_PORT} занят ({e}) — Mini App пропускаю, бот работает", flush=True)
+        return
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"[web] слушаю http://127.0.0.1:{WEB_PORT}", flush=True)
 
