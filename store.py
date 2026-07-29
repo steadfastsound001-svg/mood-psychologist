@@ -132,6 +132,16 @@ _SCHEMA = [
       liked INTEGER DEFAULT 1, text TEXT DEFAULT '', ts REAL)""",
     """CREATE TABLE IF NOT EXISTS agent_config(
       key TEXT PRIMARY KEY, value TEXT DEFAULT '', updated_at REAL)""",
+    # Индексы: без них каждый «… WHERE user_id=? ORDER BY ts» — full scan таблицы.
+    # На Turso (SQLite по HTTP) скан оплачивается ещё и сетью, поэтому это самый
+    # дешёвый способ ускорить чат, дневник и историю разом.
+    "CREATE INDEX IF NOT EXISTS ix_messages_user_ts ON messages(user_id, ts)",
+    "CREATE INDEX IF NOT EXISTS ix_diary_user_ts ON diary_entries(user_id, ts)",
+    "CREATE INDEX IF NOT EXISTS ix_documents_user ON documents(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_moodlogs_user_day ON mood_logs(user_id, day)",
+    "CREATE INDEX IF NOT EXISTS ix_pfeedback_user_ts ON portrait_feedback(user_id, ts)",
+    "CREATE INDEX IF NOT EXISTS ix_mfeedback_user_ts ON msg_feedback(user_id, ts)",
+    "CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id)",
 ]
 
 

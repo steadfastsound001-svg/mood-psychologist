@@ -1734,7 +1734,8 @@ function showAdapt() {
   const st = o.querySelector(".adapt-step");
   let i = 0;
   o._iv = setInterval(() => {
-    i++; if (i >= steps.length) return;
+    i++;
+    if (i >= steps.length) { clearInterval(o._iv); return; }  // шаги кончились — таймер гасим сами
     st.textContent = steps[i]; haptic("light");
     st.style.animation = "none"; void st.offsetWidth; st.style.animation = "";  // перезапуск fade
   }, 720);

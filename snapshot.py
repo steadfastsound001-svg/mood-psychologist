@@ -1,3 +1,4 @@
+import agent_config
 """Психологический слепок — NOW и HERO.
 
 - NOW: за 30 дней. Кэш 1 час. История пишется в snapshots_history.jsonl.
@@ -38,131 +39,6 @@ HERO_TTL = timedelta(days=10)
 # - WHO-5: WHO 1998 — благополучие, 0-100 (< 50 признак риска)
 # - SCS-SF: Raes et al., 2011 — самосострадание, 1-5 (>= 3.5 высокое)
 
-def compute_score(s: dict) -> tuple[int, dict]:
-    """На входе — оценки шкал от модели. На выходе — детерминированный score 0-100 + breakdown."""
-    phq9 = max(0, min(27, float(s.get("phq9", 0) or 0)))
-    gad7 = max(0, min(21, float(s.get("gad7", 0) or 0)))
-    k10  = max(10, min(50, float(s.get("k10", 10) or 10)))
-    who5 = max(0, min(100, float(s.get("wellbeing", 50) or 50)))
-    scs  = max(1.0, min(5.0, float(s.get("self_compassion", 3.0) or 3.0)))
-
-    # нормализуем «плохие» шкалы в 0-100 (100 = максимально плохо)
-    phq_norm = phq9 / 27 * 100
-    gad_norm = gad7 / 21 * 100
-    k10_norm = (k10 - 10) / 40 * 100
-
-    # composite distress (взвешенный) — больше веса депрессии
-    distress = phq_norm * 0.40 + gad_norm * 0.30 + k10_norm * 0.30
-
-    # инверсия + бонусы за ресурсы (но не выше +12)
-    base = 100 - distress
-    wellbeing_bonus = (who5 - 50) * 0.10           # ±5
-    compassion_bonus = (scs - 3.0) * 4             # ±8
-
-    raw = base + wellbeing_bonus + compassion_bonus
-    score = round(max(0, min(100, raw)))
-    return score, {
-        "phq9": round(phq9, 1),
-        "gad7": round(gad7, 1),
-        "k10": round(k10, 1),
-        "wellbeing": round(who5, 1),
-        "self_compassion": round(scs, 1),
-        "distress_index": round(distress, 1),
-        "formula": "100 - (PHQ9·0.40 + GAD7·0.30 + K10·0.30) + WHO5_bonus + SCS_bonus",
-    }
-
-
-SCORE_ALGORITHM_RULES = """SCORE НЕ ВЫДАВАЙ. оцени 5 валидированных шкал по симптомам в записях, score посчитает код.
-
-шкалы:
-— PHQ-9 (0-27, депрессия): 9 симптомов × 0-3 (0=нет, 1=несколько дней, 2=более половины дней, 3=почти каждый день). симптомы: ангедония, тоска, сон, усталость, аппетит, вина/самооценка, концентрация, психомоторика, суицидальные мысли.
-— GAD-7 (0-21, тревога): беспокойство, неконтрол. мысли, страх, раздраж., напряжение, бессонница, утомляемость × 0-3.
-— K10 (10-50, дистресс): шкала Кесслера, низ=10, верх=50.
-— WHO-5 (0-100, благополучие).
-— SCS-SF (1-5, самосострадание Neff).
-
-объективно, без льсти и драматизации. только из записей."""
-
-NOW_PROMPT = """ты делаешь психологический слепок NOW по дневниковым записям вани за последние 30 дней. видишь его базовый профиль и историю предыдущих NOW-слепков.
-
-""" + SCORE_ALGORITHM_RULES + """
-
-верни СТРОГО JSON. никакого markdown, никаких ```, никаких преамбул. только объект:
-
-{
-  "phq9": <число 0-27>,
-  "gad7": <число 0-21>,
-  "k10": <число 10-50>,
-  "wellbeing": <число 0-100>,
-  "self_compassion": <число 1-5, можно дробное>,
-  "label": "<короткая фраза-метка состояния>",
-  "summary": "<2-3 фразы про текущее состояние>",
-  "emotions": [{"name":"тревога","weight":<int>}, ...],
-  "themes": ["..."],
-  "patterns": ["..."],
-  "risks": ["..."],
-  "strengths": ["..."],
-  "trend": [{"date":"YYYY-MM-DD","score":<int 0-100>}, ...],
-  "shift": "<куда движется относительно предыдущих слепков, 1 фраза>",
-  "recommendations": ["..."],
-  "key_quotes": ["..."]
-}
-
-— emotions: 4-6 штук, сумма weight ≈ 100
-— themes: 3-5
-— patterns: 2-4
-— risks: 0-3
-— strengths: 2-3
-— trend: суб-оценки по дням только там где реально были записи
-— recommendations: 2-3, конкретные шаги с привязкой к ване (его профиль смотри), не общие
-— key_quotes: 1-3, реально из текста вани, не пересказ
-
-если предыдущих слепков нет — в shift напиши "первый замер".
-не льсти, не драматизируй. шкалы — клинически точно по симптомам в записях."""
-
-HERO_PROMPT = """ты делаешь HERO-слепок — лайфтайм психопортрет вани. видишь базовый профиль, всю историю дневника и всю историю NOW-слепков.
-
-это глубокая характеристика человека, не отчёт за неделю. сделай как написал бы зрелый клинический психолог о клиенте после долгой работы — плотно, без воды, без шаблонов.
-
-""" + SCORE_ALGORITHM_RULES + """
-для HERO шкалы оцениваешь УСРЕДНЁННО за всю наблюдаемую жизнь (тренд, базовая линия).
-
-верни СТРОГО JSON. никакого markdown, без ```:
-
-{
-  "phq9": <число 0-27>,
-  "gad7": <число 0-21>,
-  "k10": <число 10-50>,
-  "wellbeing": <число 0-100>,
-  "self_compassion": <число 1-5>,
-  "label": "<тип личности одной фразой>",
-  "portrait": "<психопортрет 4-7 плотных абзацев через \\n\\n. кто этот человек, как устроен, чем дышит, где болит. образно где режет точнее.>",
-  "traits": [{"name":"перфекционизм","strength":<int 0-100>}, ...],
-  "core_values": ["..."],
-  "deep_themes": ["..."],
-  "life_patterns": ["..."],
-  "defense_mechanisms": ["..."],
-  "recurring_distortions": ["..."],
-  "key_relationships": ["..."],
-  "growth_arc": "<откуда шёл → куда пришёл → куда движется, 2-3 фразы>",
-  "strengths": ["..."],
-  "vulnerabilities": ["..."],
-  "long_recommendations": ["..."]
-}
-
-score НЕ выдавай — его посчитает код по формуле.
-— traits: 5-7 черт
-— core_values: 3-5
-— deep_themes: 3-5
-— life_patterns: 3-5
-— defense_mechanisms: 2-4
-— recurring_distortions: 2-4
-— key_relationships: 2-4
-— strengths: 3-5
-— vulnerabilities: 2-4
-— long_recommendations: 3-5, системные на годы, не на завтра
-
-не дублируй пункты между блоками. каждое поле несёт свой смысл."""
 
 
 # ───────────── чтение данных ─────────────
@@ -300,7 +176,7 @@ def build_now_snapshot(client: Anthropic, force: bool = False) -> dict:
         model=MODEL,
         max_tokens=2500,
         system=[
-            {"type": "text", "text": NOW_PROMPT},
+            {"type": "text", "text": agent_config.cfg("snapshot_now_prompt")},
             {
                 "type": "text",
                 "text": f"<базовый_профиль_вани>\n{profile}\n</базовый_профиль_вани>",
@@ -371,7 +247,7 @@ def build_hero_snapshot(client: Anthropic, force: bool = False) -> dict:
         model=MODEL,
         max_tokens=4000,
         system=[
-            {"type": "text", "text": HERO_PROMPT},
+            {"type": "text", "text": agent_config.cfg("snapshot_hero_prompt")},
             {
                 "type": "text",
                 "text": f"<базовый_профиль_вани>\n{profile}\n</базовый_профиль_вани>",

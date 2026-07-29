@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "description": "Личность и поведение психолога soul. Файлы — источник правды; правки подхватываются без пересборки (hot reload по mtime).",
+  "soul": "soul.md",
+  "system_layers": [
+    "system/00-intro.md",
+    "system/01-identity.md",
+    "system/02-therapy.md",
+    "system/03-voice.md",
+    "system/04-behavior.md",
+    "system/05-boundaries.md"
+  ],
+  "layer_order": [
+    "soul",
+    "system_base"
+  ],
+  "prompts": {
+    "anti_ai": "prompts/anti_ai.md",
+    "humanizer_prompt": "prompts/editor.md",
+    "compile_prompt": "prompts/portrait.md",
+    "weekly_prompt": "prompts/weekly.md",
+    "dynmood_prompt": "prompts/dynmood.md",
+    "diary_feedback_prompt": "prompts/diary_feedback.md",
+    "diary_polish_prompt": "prompts/diary_polish.md",
+    "skill_router_prompt": "prompts/skill_router.md",
+    "bot_diary_polish_prompt": "prompts/diary_polish_bot.md",
+    "extractor_prompt": "prompts/extractor.md",
+    "compact_prompt": "prompts/compact.md",
+    "insight_prompt": "prompts/insight.md",
+    "snapshot_now_prompt": "prompts/snapshot_now.md",
+    "snapshot_hero_prompt": "prompts/snapshot_hero.md",
+    "insights_notes_prompt": "prompts/insights_notes.md"
+  },
+  "filters": {
+    "filter_gpt": "filters/gpt.md",
+    "filter_gemini": "filters/gemini.md",
+    "filter_deepseek": "filters/deepseek.md",
+    "filter_qwen": "filters/qwen.md",
+    "filter_llama": "filters/llama.md"
+  }
+}

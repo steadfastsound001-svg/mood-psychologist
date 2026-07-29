@@ -1,0 +1,20 @@
+{
+  "client": {
+    "webapp": "клиент",
+    "bot": "ваня",
+    "_comment": "{client} в текстах подставляется отсюда: у бота личное имя, у вебаппа — обезличенно"
+  },
+  "models": {
+    "model_chat": "google/gemini-3-flash-preview",
+    "model_deep": "google/gemini-3.1-pro-preview",
+    "humanizer_model": "anthropic/claude-sonnet-4.6"
+  },
+  "limits": {
+    "chat_max_tokens": 700,
+    "bot_chat_max_tokens": 320,
+    "editor_extra_tokens": 200
+  },
+  "toggles": {
+    "humanize_on": "1"
+  }
+}

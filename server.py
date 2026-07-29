@@ -23,31 +23,16 @@ import store
 import onboarding
 import stt
 from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text, trim_incomplete, sentence_guard, _humanize_models as _humanize_cfg
-from agent_core import user_system, ANTI_AI
+from agent_core import user_system
 import agent_config
 
-# ── редактируемые вторичные промпты (дефолты; админка может переопределить) ──
-WEEKLY_PROMPT = ("ты психолог. на входе — реплики клиента за неделю. напиши тёплые итоги недели.\n\n"
-                 "формат строго такой, ровно 3 блока, между блоками — пустая строка:\n"
-                 "**в фокусе** — что занимало тебя на этой неделе, 1-2 фразы\n\n"
-                 "**сдвиг** — что изменилось или начало меняться, 1-2 фразы\n\n"
-                 "**ориентир** — один мягкий, конкретный шаг на следующую неделю, 1 фраза\n\n"
-                 "правила: на «ты», строчные буквы, живой язык, без воды. жирным — только три заголовка блоков "
-                 "(**в фокусе**, **сдвиг**, **ориентир**), больше никакого markdown, ни тире-списков, ни цифр-пунктов. "
-                 "только из реплик клиента, не выдумывай.\n\n" + ANTI_AI)
-DYNMOOD_PROMPT = ("ты психолог. на входе — дневник и реплики клиента за последние 10 дней. "
-                  "оцени общий настрой ОДНИМ числом 0-100 (0 — очень тяжело, 50 — нейтрально, 100 — отлично). "
-                  "дай: note — одну короткую строку-резюме; desc — 2-3 предложения о том, как человек "
-                  "чувствовал себя эти 10 дней (что было в фокусе, какие колебания, на чём держался). "
-                  "на «ты», строчные, тепло и по делу, без воды и без markdown.\n\n" + ANTI_AI + "\n\n"
-                  "верни СТРОГО JSON: {\"score\": <int>, \"note\": \"<строка>\", \"desc\": \"<2-3 предложения>\"}")
-DIARY_FB_PROMPT = ("ты психолог, читаешь запись дневника клиента. дай короткий отклик-ревью — "
-                   "1-2 строки, на «ты», строчные. ТОЛЬКО наблюдение/отражение того, что видишь в записи. "
-                   "НЕ задавай вопросов — это не диалог, а отклик на запись. без советов-шаблонов, "
-                   "без «понимаю/я рядом/это нормально», без markdown. только по сути записи.\n\n" + ANTI_AI)
-agent_config.register("weekly_prompt", WEEKLY_PROMPT, "Итоги недели", "3 блока: в фокусе / сдвиг / ориентир.", "prompt", 5)
-agent_config.register("dynmood_prompt", DYNMOOD_PROMPT, "Настрой за 10 дней", "Число 0-100 + резюме по дневнику и чату. ВНИМАНИЕ: должен возвращать строгий JSON.", "prompt", 6)
-agent_config.register("diary_feedback_prompt", DIARY_FB_PROMPT, "Отклик на запись дневника", "Короткое ревью без вопросов.", "prompt", 7)
+# ── вторичные промпты: тексты в config/psychologist/prompts/, здесь только метаданные
+#    для техпанели (админка может переопределить значение поверх файла) ──
+agent_config.register("weekly_prompt", "", "Итоги недели", "3 блока: в фокусе / сдвиг / ориентир. Файл: prompts/weekly.md", "prompt", 5)
+agent_config.register("dynmood_prompt", "", "Настрой за 10 дней", "Число 0-100 + резюме. ВНИМАНИЕ: должен возвращать строгий JSON. Файл: prompts/dynmood.md", "prompt", 6)
+agent_config.register("diary_feedback_prompt", "", "Отклик на запись дневника", "Короткое ревью без вопросов. Файл: prompts/diary_feedback.md", "prompt", 7)
+agent_config.register("diary_polish_prompt", "", "Чистка записи дневника", "Орфография/пунктуация без смены смысла. Файл: prompts/diary_polish.md", "prompt", 8)
+agent_config.register("insights_notes_prompt", "", "Живые заметки о клиенте", "Само-обучение: что агент запоминает между сессиями. Файл: prompts/insights_notes.md", "prompt", 9)
 
 client = Anthropic()  # для нестримовых вызовов (weekly/opener)
 
@@ -84,7 +69,7 @@ def _dyn_mood_compute(uid, entries):
         chat_blob = "\n".join(f"— {c[:400]}" for c in chat_lines)
         blob = "[записи дневника]\n" + (diary_blob or "(нет)") + \
                "\n\n[реплики в разговорах с психологом]\n" + (chat_blob or "(нет)")
-        sys = agent_config.cfg("dynmood_prompt", DYNMOOD_PROMPT)
+        sys = agent_config.cfg("dynmood_prompt")
         resp = client.messages.create(
             system=sys, messages=[{"role": "user", "content": blob}],
             max_tokens=400, task="fast",
@@ -118,13 +103,7 @@ def _learn_bg(uid):
             for m in msgs[-30:]
         )
         prior = store.get_insights(uid)
-        sys = ("ты ведёшь личные рабочие заметки психолога об этом клиенте — чтобы со временем "
-               "понимать его всё точнее и давать всё более персональные ходы. "
-               "на входе: прошлые заметки и последние реплики из сессий. обнови заметки. "
-               "фиксируй ТОЛЬКО устойчивое: повторяющиеся паттерны, триггеры, что помогает и что не "
-               "работает с ним, ценности, цели, как с ним лучше говорить. разовое — выкидывай. "
-               "сжато, пунктами, до 1200 знаков, строчные, без воды и без markdown. "
-               "верни ТОЛЬКО обновлённый текст заметок.")
+        sys = agent_config.cfg("insights_notes_prompt")
         u = f"[прошлые заметки]\n{prior or '(пусто)'}\n\n[последние реплики]\n{convo}"
         resp = client.messages.create(
             system=sys, messages=[{"role": "user", "content": u}],
@@ -499,7 +478,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(user_texts) < 3:
             return ""
         blob = "\n".join(f"— {t}" for t in user_texts[-40:])
-        sys = agent_config.cfg("weekly_prompt", WEEKLY_PROMPT)
+        sys = agent_config.cfg("weekly_prompt")
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": blob}],
@@ -541,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _diary_feedback(self, text):
         """Короткий психологический отклик на запись дневника (1-2 строки, голос психолога)."""
-        sys = agent_config.cfg("diary_feedback_prompt", DIARY_FB_PROMPT)
+        sys = agent_config.cfg("diary_feedback_prompt")
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": text[:4000]}],
@@ -554,10 +533,7 @@ class Handler(BaseHTTPRequestHandler):
     def _diary_polish(self, raw):
         """Бот бережно вычищает запись дневника: орфография, пунктуация, абзацы.
         Смысл, тон и голос автора не меняет. При сбое — возвращает исходник."""
-        sys = ("ты бережный редактор личного дневника. вычисти текст: орфография, пунктуация, "
-               "заглавные буквы, разбивка на абзацы. НЕ меняй смысл, факты, стиль и голос автора, "
-               "не добавляй и не выкидывай мысли, не комментируй. верни ТОЛЬКО отредактированный текст "
-               "от первого лица, без markdown и без кавычек вокруг.")
+        sys = agent_config.cfg("diary_polish_prompt")
         try:
             resp = client.messages.create(
                 system=sys, messages=[{"role": "user", "content": raw}],

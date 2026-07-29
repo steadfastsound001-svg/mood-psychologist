@@ -12,3 +12,8 @@ learned_profile.md
 webapp/avatar.jpg
 tools/.notes_token
 tools/.notes_sync_state.json
+
+# экспорт конфига психолога — генерится из config/psychologist/
+exports/
+config/psychologist.backup/
+config/.psychologist_incoming/

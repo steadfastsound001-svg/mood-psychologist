@@ -18,6 +18,15 @@ _TTL = 15.0
 # в т.ч. пустой строкой = «слой выключен». thread-local → не течёт между запросами.
 _TLS = threading.local()
 
+# источник дефолтов из файлов (psyconfig). Отдаёт свежее значение при каждом
+# обращении → правка .md подхватывается без рестарта. Оверрайд из БД всё равно главнее.
+_default_provider = None
+
+
+def set_default_provider(fn):
+    global _default_provider
+    _default_provider = fn
+
 
 def set_overrides(d):
     _TLS.ov = {str(k): ("" if v is None else str(v)) for k, v in (d or {}).items()}
@@ -47,13 +56,18 @@ def _overrides() -> dict:
 
 
 def cfg(key, default=None):
-    """Эффективное значение: per-call override (песочница) → override из БД → дефолт реестра → default."""
+    """Эффективное значение: per-call override (песочница) → override из БД →
+    файл конфига (psyconfig, hot reload) → дефолт реестра → default."""
     co = _call_ov()
     if co is not None and key in co:
         return co[key]                 # "" = слой выключен на этот запрос
     ov = _overrides().get(key)
     if ov:
         return ov
+    if _default_provider is not None:
+        v = _default_provider(key)
+        if v:
+            return v
     if key in _REG:
         return _REG[key]["default"]
     return default
@@ -81,9 +95,12 @@ def all_items() -> list[dict]:
     ov = _overrides()
     items = []
     for k, m in sorted(_REG.items(), key=lambda x: (x[1]["cat"], x[1]["order"], x[0])):
+        base = m["default"]
+        if _default_provider is not None:      # дефолт показываем тот, что реально в файле
+            base = _default_provider(k) or base
         items.append({
             "key": k, "label": m["label"], "desc": m["desc"], "cat": m["cat"],
-            "value": ov.get(k) or "", "default": m["default"],
+            "value": ov.get(k) or "", "default": base,
             "overridden": bool(ov.get(k)),
         })
     return items
