@@ -53,6 +53,9 @@ def _build() -> tuple[dict, dict]:
 
     who = (variables.get("client") or {}).get(ROLE) or "клиент"
     subst = {"client": who, "client_name": who}
+    # кризисные номера подставляются из variables.json, а не лежат в тексте слоя:
+    # слой кэшируется и уехал бы одним списком всем, включая клиентов не из этой страны.
+    subst["crisis_numbers"] = (variables.get("crisis") or {}).get("numbers", "")
 
     def fill(t: str) -> str:
         for k, v in subst.items():
@@ -71,7 +74,12 @@ def _build() -> tuple[dict, dict]:
         vals[key] = fill(_read(rel))
     for key, rel in (manifest.get("filters") or {}).items():
         vals[key] = fill(_read(rel))
+    # safety-файлы кладём как есть: это данные для кода (лексикон детектора), не текст промпта
+    for key, rel in (manifest.get("safety") or {}).items():
+        vals[key] = _read(rel)
 
+    # номера отдаём и отдельным ключом: safety.guarantee сверяет по ним ответ модели
+    vals["crisis_numbers"] = subst["crisis_numbers"]
     vals["layer_order"] = ",".join(manifest.get("layer_order") or ["soul", "system_base"])
     for k, v in (variables.get("models") or {}).items():
         if v:
@@ -119,6 +127,7 @@ def info() -> dict:
 
 REQUIRED = ("soul", "system_base", "humanizer_prompt", "compile_prompt")
 MIN_LEN = 200          # слой короче — почти наверняка обрезан/пустой файл
+RUNTIME_PLACEHOLDERS = {"keys"}   # подставляются кодом в момент вызова (skill_router)
 
 
 def validate() -> list[str]:
@@ -156,6 +165,19 @@ def validate() -> list[str]:
     for key in REQUIRED:
         if len(vals.get(key) or "") < MIN_LEN:
             problems.append(f"ключ {key} подозрительно короткий ({len(vals.get(key) or '')} симв.)")
+
+    # нерезолвнутый плейсхолдер уехал бы клиенту как «{crisis_numbers}» посреди кризиса.
+    # RUNTIME_PLACEHOLDERS подставляет код в момент вызова — их пропускаем.
+    import re
+    for key, text in vals.items():
+        for ph in set(re.findall(r"\{([a-z_]{3,30})\}", text or "")):
+            if ph not in RUNTIME_PLACEHOLDERS:
+                problems.append(f"в {key} остался неподставленный плейсхолдер {{{ph}}}")
+
+    # кризисный слой обязан нести хотя бы один номер
+    scope = vals.get("system_base") or ""
+    if "КРИЗИС" in scope and not re.search(r"\b(112|8-800|911|999)\b", scope):
+        problems.append("в кризисном слое нет ни одного телефона экстренной помощи")
     return problems
 
 

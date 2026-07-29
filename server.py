@@ -21,6 +21,7 @@ load_dotenv(ROOT / ".env", override=True)
 
 import store
 import onboarding
+import safety
 import stt
 from llm import Anthropic, stream_completion_sync, humanize_stream, humanize_text, trim_incomplete, sentence_guard, _humanize_models as _humanize_cfg
 from agent_core import user_system
@@ -348,9 +349,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         acc = []
-        # ДВА АГЕНТА: 1) DeepSeek-аналитик собирает суть → 2) Sonnet-редактор чинит/доводит до голоса и стримит.
+        # ДВА АГЕНТА: 1) аналитик собирает суть → 2) Sonnet-редактор доводит до голоса и стримит.
         on, _editor_model, _ = _humanize_cfg()
         cap = agent_config.cfg_int("chat_max_tokens", 700)
+        # риск считаем в коде до LLM: в кризисе потолок ответа поднимается, иначе
+        # девятишаговый протокол физически не помещается и обрывается на полуслове.
+        tier = safety.detect(text, [m["content"] for m in messages[:-1] if m.get("role") == "user"])
+        cap = safety.policy_for(tier, cap)["max_tokens"]
         try:
             if on:
                 # агент 1 — аналитик (task=dialog → model_chat), полный контекст, не стримим клиенту
@@ -378,6 +383,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
         reply = "".join(acc).strip()
+        # в кризисе телефон обязан быть в ответе. модель могла его не дать — дописываем.
+        fixed = safety.guarantee(reply, tier)
+        if fixed != reply:
+            try:
+                self.wfile.write(fixed[len(reply):].encode("utf-8")); self.wfile.flush()
+            except Exception:
+                pass
+            reply = fixed
+            print(f"[safety] uid={uid} tier={tier}: дописал номер в ответ", flush=True)
         if reply:
             store.add_message(uid, "user", text)
             store.add_message(uid, "assistant", reply)

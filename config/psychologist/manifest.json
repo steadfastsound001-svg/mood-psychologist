@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Личность и поведение психолога soul. Файлы — источник правды; правки подхватываются без пересборки (hot reload по mtime).",
   "soul": "soul.md",
   "system_layers": [
@@ -8,7 +8,9 @@
     "system/02-therapy.md",
     "system/03-voice.md",
     "system/04-behavior.md",
-    "system/05-boundaries.md"
+    "system/05-boundaries.md",
+    "system/06-memory.md",
+    "system/07-scope.md"
   ],
   "layer_order": [
     "soul",
@@ -36,6 +38,10 @@
     "filter_gemini": "filters/gemini.md",
     "filter_deepseek": "filters/deepseek.md",
     "filter_qwen": "filters/qwen.md",
-    "filter_llama": "filters/llama.md"
+    "filter_llama": "filters/llama.md",
+    "filter_claude": "filters/claude.md"
+  },
+  "safety": {
+    "markers": "safety/markers.json"
   }
 }

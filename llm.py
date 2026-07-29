@@ -85,7 +85,11 @@ _FILTER_DEEPSEEK = ""   # текст в config/psychologist/filters/
 _FILTER_QWEN = ""   # текст в config/psychologist/filters/
 _FILTER_LLAMA = ""   # текст в config/psychologist/filters/
 _FILTER_GEMINI = ""   # текст в config/psychologist/filters/
+_FILTER_CLAUDE = ""   # текст в config/psychologist/filters/claude.md
 import agent_config
+agent_config.register("filter_claude", _FILTER_CLAUDE, "Фильтр модели: Claude",
+                      "Гасит почерк Claude: рефлекс валидации чувств, трёхчастная структура, кальки терапевт-английского. "
+                      "Важен, т.к. финал клиенту пишет именно Claude-редактор.", "filter", 0)
 agent_config.register("filter_gpt", _FILTER_GPT, "Фильтр модели: GPT", "Глушит подхалимаж и почерк GPT. Включается на gpt-* и gpt-oss.", "filter", 1)
 agent_config.register("filter_deepseek", _FILTER_DEEPSEEK, "Фильтр модели: DeepSeek", "Глушит многословие DeepSeek.", "filter", 2)
 agent_config.register("filter_qwen", _FILTER_QWEN, "Фильтр модели: Qwen", "Глушит вежливость/кальку Qwen.", "filter", 3)
@@ -212,6 +216,7 @@ def sentence_guard(gen, hold: int = 160):
 
 # (подстрока в имени модели) -> ключ конфига фильтра. порядок: специфичное раньше общего.
 _FILTER_KEYS = [
+    ("claude", "filter_claude"), ("anthropic/", "filter_claude"),
     ("gpt-5", "filter_gpt"), ("gpt-4", "filter_gpt"), ("gpt-oss", "filter_gpt"),
     ("gemini", "filter_gemini"),
     ("deepseek", "filter_deepseek"), ("qwen", "filter_qwen"), ("llama", "filter_llama"),

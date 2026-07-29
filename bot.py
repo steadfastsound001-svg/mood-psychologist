@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 from llm import Anthropic, stream_completion, trim_incomplete, humanize_text  # OpenRouter-обёртка
 os.environ.setdefault("PSY_ROLE", "bot")   # в TG психолог обращается по имени
 import psyconfig
+import safety
 import agent_config
 from agent_core import htmlify, html_to_plain
 import agent_core  # noqa: F401 — регистрирует промпты (душа/редактор) в agent_config
@@ -335,6 +336,11 @@ async def stream_reply(
     """Стримит ответ модели в Telegram, обновляя одно сообщение. Возвращает финальный текст."""
     user_id = update.effective_user.id
     messages, user_msg = _prepare_messages(user_text, mode, user_id)
+    # риск считаем в коде: у бота потолок вдвое ниже, и кризисный протокол
+    # без подъёма лимита обрывается на полуслове.
+    tier = safety.detect(user_text) if mode in ("entry", "ask") else None
+    if tier:
+        max_tokens = safety.policy_for(tier, max_tokens)["max_tokens"]
 
     placeholder = await update.message.reply_text("…")
     chat_id = placeholder.chat.id
@@ -405,6 +411,7 @@ async def stream_reply(
                     full = trim_incomplete(edited)
             except Exception:
                 pass  # редактор не ответил → оставляем черновик
+        full = safety.guarantee(full, tier)   # в кризисе телефон обязан быть
         await push(full, final=True)
     except Exception as e:
         await push(full + f"\n\n[обрыв стрима: {e}]" if full else f"сломалось: {e}")
