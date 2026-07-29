@@ -619,6 +619,10 @@ function startChatPoll() {
     if (curView !== "chat" || streaming || document.hidden) return;
     try {
       const r = await api("/api/v2/messages");
+      // перепроверяем ПОСЛЕ await: отправка могла начаться пока шёл запрос.
+      // reconcile во время стрима выкидывает пустой agent-хвост, последним
+      // становится user — и done() записывал ответ психолога в реплику клиента.
+      if (streaming || curView !== "chat") return;
       if (!r || !Array.isArray(r.messages)) return;
       const h = r.messages.map((m) => ({ role: m.role === "user" ? "user" : "agent", text: m.content }));
       if (h.length && reconcileChat(h)) chatRender();   // принять только если сервер впереди
@@ -1199,7 +1203,11 @@ async function sendMessage() {
     agentEl.classList.remove("streaming");
     streaming = false; hapticOk();
     const f = loadChat();
-    f[f.length - 1].text = (acc || "(пусто)").trim();   // как сервер (strip) → poll не перерисует зря
+    const body = (acc || "(пусто)").trim();             // как сервер (strip) → poll не перерисует зря
+    // писать строго в свою agent-ячейку. если хвост успел перестроиться (кросс-девайс,
+    // reconcile), позиция уже не наша — тогда добавляем, а не затираем чужое сообщение.
+    if (f.length && f[f.length - 1].role === "agent") f[f.length - 1].text = body;
+    else f.push({ role: "agent", text: body });
     saveChat(f);
     agentEl.dataset.full = (acc || "").replace(/\*\*/g, "");
     if (acc && acc.trim()) addFeedback(agentEl, acc);   // 👍/👎 сразу на свежий ответ
