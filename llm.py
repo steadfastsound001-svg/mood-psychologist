@@ -21,8 +21,8 @@ def _base_url() -> str:
 
 
 def _default_model() -> str:
-    # DeepSeek-v4-flash: быстрый, бесплатный, заточен под лаконичные диалоги.
-    return os.environ.get("LLM_MODEL", "deepseek/deepseek-v4-flash:free")
+    # Быстрая живая модель по умолчанию (прежний :free-дефолт отдаёт 404).
+    return os.environ.get("LLM_MODEL", "google/gemini-3-flash-preview")
 
 
 # ───────────── OpenAI (платный, основной) ─────────────
@@ -61,12 +61,12 @@ def _openai_model_for_task(task: str | None) -> str | None:
 # Specialist routing: разные модели под разные задачи.
 # Каждая лучше своих сородичей в своей нише — synergy без оплаты.
 TASK_MODELS = {
-    "dialog":    "openai/gpt-oss-120b:free",                   # умнее, рассуждающая — главное для голоса
-    "reasoning": "openai/gpt-oss-120b:free",                   # /week, /month, /goals
-    "analysis":  "qwen/qwen3-next-80b-a3b-instruct:free",      # длинный контекст: snapshot NOW/HERO
-    "fast":      "deepseek/deepseek-v4-flash:free",            # extract, edit_entry, router — быстрое, дешёвое
-    "deep":      "openai/gpt-oss-120b:free",                   # /ask deep mode
-    "consolidate": "qwen/qwen3-next-80b-a3b-instruct:free",    # сжатие профиля
+    "dialog":    "google/gemini-3-flash-preview",   # чат: главное — скорость, финал всё равно пишет редактор
+    "reasoning": "google/gemini-3.1-pro-preview",   # /week, /month, /goals
+    "analysis":  "google/gemini-3.1-pro-preview",   # длинный контекст: snapshot NOW/HERO
+    "fast":      "anthropic/claude-haiku-4.5",      # extract, чистка, роутер — самая быстрая (1.4с)
+    "deep":      "google/gemini-3.1-pro-preview",   # /ask deep mode
+    "consolidate": "google/gemini-3.1-pro-preview", # сжатие профиля
 }
 
 
@@ -241,11 +241,13 @@ def _sys_for_model(model: str, base_sys: str) -> str:
 
 
 # Фолбэк-цепочка: если нужная модель rate-limit, идём по альтернативам.
+# ТОЛЬКО живые модели (проверено запросом 29.07.2026). Прежний список из четырёх
+# :free-моделей целиком отдавал 404 — при сбое основной шёл перебор мертвецов,
+# и каждый add-on добавлял задержку к и без того медленному ответу.
+# Два разных вендора подряд — страховка от падения одного провайдера.
 _FALLBACK_EXTRA = [
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "openai/gpt-oss-120b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-v4-flash:free",
+    "anthropic/claude-haiku-4.5",
+    "google/gemini-3-flash-preview",
 ]
 
 
