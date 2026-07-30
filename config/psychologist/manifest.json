@@ -34,13 +34,14 @@
     "snapshot_hero_prompt": "prompts/snapshot_hero.md",
     "insights_notes_prompt": "prompts/insights_notes.md"
   },
+  "_filters_note": "Регламент анти-почерка намеренно ОДИН на все модели: он про то, каким ответ быть не должен, а не про особенности конкретной модели. Шесть ключей смотрят в один файл — правишь в одном месте. Понадобится развести какую-то модель — заведи ей отдельный файл и переставь её ключ сюда.",
   "filters": {
-    "filter_gpt": "filters/gpt.md",
-    "filter_gemini": "filters/gemini.md",
-    "filter_deepseek": "filters/deepseek.md",
-    "filter_qwen": "filters/qwen.md",
-    "filter_llama": "filters/llama.md",
-    "filter_claude": "filters/claude.md"
+    "filter_gpt": "filters/common.md",
+    "filter_gemini": "filters/common.md",
+    "filter_deepseek": "filters/common.md",
+    "filter_qwen": "filters/common.md",
+    "filter_llama": "filters/common.md",
+    "filter_claude": "filters/common.md"
   },
   "safety": {
     "markers": "safety/markers.json"
