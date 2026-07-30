@@ -28,7 +28,8 @@ MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 import certifi
 from dotenv import load_dotenv
 
-from llm import Anthropic, stream_completion, trim_incomplete, humanize_text  # OpenRouter-обёртка
+from llm import (Anthropic, stream_completion, stream_completion_sync,
+                 trim_incomplete, humanize_text)  # OpenRouter-обёртка
 os.environ.setdefault("PSY_ROLE", "bot")   # в TG психолог обращается по имени
 import psyconfig
 import safety
@@ -709,6 +710,11 @@ class WebHandler(BaseHTTPRequestHandler):
         h = self.headers.get("Authorization", "")
         return h[7:].strip() if h.startswith("Bearer ") else ""
 
+    def _is_owner(self) -> bool:
+        """Центр управления виден только владельцу — по почте из токена сессии."""
+        user = store.user_by_token(self._bearer())
+        return bool(user and (user.get("email") or "").strip().lower() == OWNER_EMAIL)
+
     def _read_body(self) -> dict:
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -799,6 +805,44 @@ class WebHandler(BaseHTTPRequestHandler):
 
                 threading.Thread(target=_recompile_bg, daemon=True).start()
                 self._send_json(200, {"ok": True})
+                return
+
+            # ── центр управления: правка промптов и проба голоса ──
+            if url.path in ("/api/admin/config", "/api/admin/test-chat"):
+                if not self._is_owner():
+                    self._send_json(403, {"error": "forbidden"})
+                    return
+                if url.path == "/api/admin/config":
+                    key = (body.get("key") or "").strip()
+                    if not key:
+                        self._send_json(400, {"error": "no key"})
+                        return
+                    agent_config.set_item(key, body.get("value") or "")
+                    self._send_json(200, {"ok": True})
+                    return
+                # проба: тот же промпт и модели, но без записи в историю клиента
+                q = (body.get("q") or "").strip()
+                if not q:
+                    self._send_json(400, {"error": "empty"})
+                    return
+                msgs = [{"role": "user" if m.get("role") == "user" else "assistant",
+                         "content": (m.get("content") or "").strip()}
+                        for m in (body.get("history") or [])[-20:] if (m.get("content") or "").strip()]
+                msgs.append({"role": "user", "content": q})
+                tier = safety.detect(q)
+                cap = safety.policy_for(tier, agent_config.cfg_int("chat_max_tokens", 700))["max_tokens"]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                try:
+                    draft = trim_incomplete("".join(stream_completion_sync(
+                        system=cached_system(), messages=msgs, max_tokens=cap, task="dialog")).strip())
+                    final = safety.guarantee(
+                        trim_incomplete(humanize_text(draft, q, cap + 200)) or draft, tier)
+                    self.wfile.write(final.encode("utf-8"))
+                except Exception as e:
+                    self.wfile.write(f"сломалось: {e}".encode("utf-8"))
                 return
 
             if url.path == "/api/v2/chat":
@@ -998,6 +1042,25 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/onboarding/questions":
             self._send_json(200, {"questions": onboarding.questions_public()})
+            return
+        # ── центр управления: те же данные, что у прод-сервера. Нужны здесь,
+        #    потому что панель открывают и через локальный туннель бота.
+        if url.path in ("/api/admin/overview", "/api/admin/config"):
+            if not self._is_owner():
+                self._send_json(403, {"error": "forbidden"})
+                return
+            if url.path == "/api/admin/config":
+                self._send_json(200, {"items": agent_config.all_items()})
+                return
+            self._send_json(200, {
+                "owner_email": OWNER_EMAIL,
+                "users": store.admin_overview(),
+                "config": {**psyconfig.info(), "problems": psyconfig.validate()},
+                "safety": {"markers_ok": not safety.selftest(),
+                           "numbers": len(safety._known_numbers())},
+                "models": {k: agent_config.cfg(k) for k in
+                           ("model_chat", "model_deep", "humanizer_model", "humanize_on")},
+            })
             return
         if url.path == "/api/me":
             user = store.user_by_token(self._bearer())
