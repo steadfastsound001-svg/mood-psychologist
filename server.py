@@ -618,6 +618,8 @@ class Handler(BaseHTTPRequestHandler):
                 "models": {k: agent_config.cfg(k) for k in
                            ("model_chat", "model_deep", "humanizer_model", "humanize_on")},
                 "dials": {"spec": psyconfig.dials(), "value": agent_config.cfg("dials", "")},
+                "layers": psyconfig.layers_info(),
+                "known_models": psyconfig.known_models(),
             }); return
         if p == "/api/admin/config":
             if not self._owner():

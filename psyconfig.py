@@ -33,12 +33,24 @@ def _files() -> list[pathlib.Path]:
     return sorted(DIR.rglob("*.md")) + sorted(DIR.rglob("*.json"))
 
 
-def _fingerprint() -> tuple:
-    """Отпечаток состояния каталога — меняется при любой правке/добавлении файла."""
+def _layers_override() -> str:
+    """Порядок слоёв, заданный из панели. Берём из кэша оверрайдов agent_config
+    напрямую: через cfg() была бы рекурсия — cfg зовёт этот же модуль как провайдер."""
     try:
-        return tuple((str(p), p.stat().st_mtime_ns) for p in _files())
+        import agent_config
+        return agent_config._overrides().get("layers_order", "") or ""
+    except Exception:
+        return ""
+
+
+def _fingerprint() -> tuple:
+    """Отпечаток состояния — меняется при правке файла И при смене порядка слоёв
+    из панели (иначе перестановка не подхватилась бы до перезапуска)."""
+    try:
+        files = tuple((str(p), p.stat().st_mtime_ns) for p in _files())
     except OSError:
-        return ()
+        files = ()
+    return files + (_layers_override(),)
 
 
 def _read(rel: str) -> str:
@@ -68,7 +80,21 @@ def _build() -> tuple[dict, dict]:
 
     vals: dict[str, str] = {}
     vals["soul"] = fill(_read(manifest.get("soul", "soul.md")))
-    layers = [_read(rel) for rel in manifest.get("system_layers", [])]
+    # порядок слоёв: из панели (ключ layers_order), иначе из манифеста.
+    # Порядок значим — поздний слой уточняет ранние, а хвост промпта держит внимание сильнее.
+    declared = list(manifest.get("system_layers") or [])
+    vals["layers_all"] = json.dumps(declared, ensure_ascii=False)
+    order = declared
+    custom_raw = _layers_override()
+    try:
+        custom = json.loads(custom_raw or "[]")
+        if isinstance(custom, list) and custom:
+            kept = [x for x in custom if x in declared]
+            order = kept + [x for x in declared if x not in kept]   # новый файл не теряется
+    except json.JSONDecodeError:
+        pass
+    vals["layers_order_effective"] = json.dumps(order, ensure_ascii=False)
+    layers = [_read(rel) for rel in order]
     vals["system_base"] = fill("\n\n".join(x for x in layers if x))
     for key, rel in prompts.items():
         vals[key] = fill(_read(rel))
@@ -120,6 +146,49 @@ def _ensure() -> dict:
 def get(key: str):
     """Значение ключа из файлов (свежее). None — ключа нет, решает вызывающий."""
     return _ensure().get(key)
+
+
+TITLES = {
+    "soul.md": "душа — голос и приоритеты",
+    "system/00-intro.md": "кто он: роль и честность о природе",
+    "system/01-identity.md": "язык ответа, канон, цель",
+    "system/02-therapy.md": "методы, ходы, где они не работают",
+    "system/03-voice.md": "голос, такт, живая речь",
+    "system/04-behavior.md": "ритм, режимы, длина, формат",
+    "system/05-boundaries.md": "запреты, простой язык, выдумка",
+    "system/06-memory.md": "память и польза вдолгую",
+    "system/07-scope.md": "границы компетенции и кризис",
+}
+
+
+def layers_info() -> list[dict]:
+    """Слои в текущем порядке + их вес. Панель показывает, из чего собран промпт."""
+    _ensure()
+    try:
+        order = json.loads(_cache.get("layers_order_effective") or "[]")
+    except json.JSONDecodeError:
+        order = []
+    out = []
+    for rel in order:
+        text = _read(rel)
+        out.append({"file": rel, "title": TITLES.get(rel, rel.split("/")[-1]),
+                    "chars": len(text)})
+    return out
+
+
+# модели, проверенные запросом (29.07.2026). Панель предлагает их списком,
+# но поле остаётся вводимым — новая модель не требует правки кода.
+KNOWN_MODELS = [
+    {"id": "google/gemini-3-flash-preview", "note": "быстрая · ~2.8с"},
+    {"id": "anthropic/claude-haiku-4.5", "note": "самая быстрая · ~1.4с"},
+    {"id": "anthropic/claude-sonnet-4.6", "note": "голос, редактор · ~2.2с"},
+    {"id": "google/gemini-3.1-pro-preview", "note": "глубокие задачи · ~2.9с"},
+    {"id": "deepseek/deepseek-v4-pro", "note": "рассуждающая · медленнее на длинном промпте"},
+]
+
+
+def known_models() -> list[dict]:
+    return KNOWN_MODELS
 
 
 def dials() -> list[dict]:

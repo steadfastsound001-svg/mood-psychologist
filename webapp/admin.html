@@ -163,6 +163,61 @@ button.b.ghost{background:transparent;color:var(--dim)}
 
 .empty{color:var(--faint);font-size:13px;padding:14px 2px}
 a{color:var(--accent);text-decoration:none}
+
+/* портрет личности: радар по ручкам + словесный слепок */
+.portrait{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.portrait svg{flex:0 0 190px;width:190px;height:190px}
+.pt-word{flex:1;min-width:190px}
+.pt-line{font:600 19px/1.35 Fraunces,Georgia,serif;font-variation-settings:"SOFT" 40}
+.pt-sub{font-size:12px;color:var(--dim);margin-top:9px;line-height:1.55}
+.pt-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.tag{font-size:11px;padding:5px 10px;border-radius:11px;background:rgba(192,160,128,.14);
+     border:1px solid rgba(192,160,128,.22);color:var(--ink)}
+
+/* модели */
+.mrow{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);flex-wrap:wrap}
+.mrow:last-child{border-bottom:0}
+.mrow .mk{flex:0 0 128px;font-size:13px;color:var(--dim)}
+.mrow select{flex:1;min-width:190px;margin:0}
+.mnote{font-size:11px;color:var(--faint);flex-basis:100%;padding-left:139px}
+@media(max-width:560px){.mnote{padding-left:0}}
+.switch{display:flex;gap:5px}
+.switch button{padding:8px 15px;border:1px solid var(--stroke);border-radius:12px;cursor:pointer;
+  background:rgba(255,255,255,.04);color:var(--dim);font:600 12px Manrope,sans-serif;transition:all .25s}
+.switch button[aria-selected="true"]{background:linear-gradient(180deg,rgba(192,160,128,.9),rgba(166,124,82,.85));
+  color:#211a12;border-color:transparent}
+
+/* слои: перетаскивание */
+.layer{display:flex;align-items:center;gap:12px;padding:12px 13px;margin-bottom:7px;
+  border:1px solid var(--stroke);border-radius:15px;background:rgba(255,255,255,.035);
+  cursor:grab;transition:background .2s,transform .18s,opacity .2s,border-color .2s}
+.layer:hover{background:rgba(255,255,255,.07)}
+.layer.drag{opacity:.35;cursor:grabbing}
+.layer.over{border-color:var(--accent);background:rgba(192,160,128,.12)}
+.layer .grip{color:var(--faint);font-size:15px;letter-spacing:2px;line-height:1}
+.layer .num{font:600 12px Fraunces,Georgia,serif;color:var(--accent);min-width:16px}
+.layer .lt{flex:1;font-size:13px}
+.layer .lf{font-size:11px;color:var(--faint);font-family:ui-monospace,Menlo,monospace}
+.layer .lc{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+
+/* проба — плавающее окно справа */
+#probe{position:fixed;right:18px;bottom:18px;width:min(390px,calc(100vw - 36px));z-index:60;
+  display:flex;flex-direction:column;max-height:min(76vh,660px);overflow:hidden;
+  transition:transform .38s cubic-bezier(.32,.72,0,1),opacity .3s}
+#probe.hid{transform:translateY(calc(100% + 26px));opacity:0;pointer-events:none}
+.probe-h{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:14px 17px;border-bottom:1px solid var(--stroke)}
+.probe-h .t{font:600 13px Manrope,sans-serif;letter-spacing:.3px}
+.probe-h button{background:none;border:0;color:var(--dim);font-size:19px;cursor:pointer;line-height:1;padding:0 3px}
+.probe-b{padding:13px 15px;overflow-y:auto;flex:1}
+#probeFab{position:fixed;right:18px;bottom:18px;z-index:59;padding:13px 20px;border:0;border-radius:17px;
+  cursor:pointer;font:600 13px Manrope,sans-serif;color:#211a12;
+  background:linear-gradient(180deg,rgba(192,160,128,.95),rgba(166,124,82,.95));
+  box-shadow:0 8px 26px rgba(0,0,0,.4),0 1px 0 rgba(255,255,255,.25) inset;
+  transition:transform .2s cubic-bezier(.32,.72,0,1),opacity .3s}
+#probeFab:active{transform:scale(.95)}
+#probeFab.hid{opacity:0;pointer-events:none;transform:translateY(12px)}
+@media(max-width:560px){#probe{right:10px;left:10px;bottom:10px;width:auto;max-height:70vh}}
 </style>
 </head>
 <body>
@@ -175,12 +230,21 @@ a{color:var(--accent);text-decoration:none}
   <nav class="glass" role="tablist">
     <button role="tab" data-v="pulse" aria-selected="true">пульс</button>
     <button role="tab" data-v="soul" aria-selected="false">личность</button>
-    <button role="tab" data-v="try" aria-selected="false">проба</button>
   </nav>
 
   <section id="pulse"></section>
   <section id="soul" hidden></section>
-  <section id="try" hidden></section>
+</div>
+
+<button id="probeFab">проба голоса</button>
+<div id="probe" class="glass hid">
+  <div class="probe-h">
+    <span class="t">проба голоса</span>
+    <span style="flex:1"></span>
+    <button id="probeClear" title="очистить">⟲</button>
+    <button id="probeHide" title="свернуть">✕</button>
+  </div>
+  <div class="probe-b" id="probeBody"></div>
 </div>
 
 <script>
@@ -298,6 +362,178 @@ function editor(it) {
   acts.append(save, reset);
   return e("div", {}, ta, acts);
 }
+/* ─── портрет: сумма настроек одним взглядом ─── */
+const NS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs = {}, text) => {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (text != null) n.textContent = text;      // подписи — текстом, без разбора разметки
+  return n;
+};
+const PT_WORDS = {
+  warmth:      ["ледяной", "сдержанный", "ровный", "тёплый", "обнимающий"],
+  directness:  ["иносказательный", "мягкий", "тактичный", "прямой", "режущий"],
+  brevity:     ["обстоятельный", "неспешный", "собранный", "краткий", "молчаливый"],
+  questions:   ["утверждающий", "слушающий", "спрашивающий", "въедливый", "неотступный"],
+  irony:       ["серьёзный", "сдержанный", "с иронией", "насмешливый", "острый"],
+  melancholy:  ["ясный", "спокойный", "с грустинкой", "меланхоличный", "печальный"],
+  initiative:  ["ведомый", "осторожный", "внимательный", "ведущий", "настойчивый"],
+};
+function chosenDials() {
+  let c = {};
+  try { c = JSON.parse(DATA?.dials?.value || "{}") || {}; } catch (_) {}
+  const out = {};
+  for (const d of (DATA?.dials?.spec) || [])
+    out[d.key] = Number.isInteger(c[d.key]) ? c[d.key] : (d.default ?? 2);
+  return out;
+}
+function portraitCard() {
+  const spec = (DATA?.dials?.spec) || [];
+  if (!spec.length) return null;
+  const ch = chosenDials();
+  const N = spec.length, R = 74, cx = 95, cy = 95;
+  const pt = (i, r) => {
+    const a = (Math.PI * 2 * i) / N - Math.PI / 2;
+    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+  };
+  const poly = (r) => spec.map((_, i) => pt(i, r).map(v => v.toFixed(1)).join(",")).join(" ");
+
+  const svg = svgEl("svg", { viewBox: "0 0 190 190", "aria-label": "портрет личности" });
+  [1, .66, .33].forEach(k => svg.append(svgEl("polygon",
+    { points: poly(R * k), fill: "none", stroke: "rgba(255,255,255,.09)", "stroke-width": "1" })));
+  spec.forEach((_, i) => {
+    const [x, y] = pt(i, R);
+    svg.append(svgEl("line", { x1: cx, y1: cy, x2: x.toFixed(1), y2: y.toFixed(1),
+                               stroke: "rgba(255,255,255,.07)" }));
+  });
+  const shape = spec.map((d, i) => pt(i, 16 + (ch[d.key] / 4) * (R - 16)).map(v => v.toFixed(1)).join(",")).join(" ");
+  svg.append(svgEl("polygon", { points: shape, fill: "rgba(192,160,128,.24)",
+    stroke: "#c0a080", "stroke-width": "1.7", "stroke-linejoin": "round" }));
+  spec.forEach((d, i) => {
+    const [x, y] = pt(i, 16 + (ch[d.key] / 4) * (R - 16));
+    svg.append(svgEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: "2.6", fill: "#c0a080" }));
+    const [lx, ly] = pt(i, R + 13);
+    svg.append(svgEl("text", { x: lx.toFixed(1), y: (ly + 3).toFixed(1), "font-size": "8.5",
+      fill: "#9d968a", "text-anchor": "middle", "font-family": "Manrope,sans-serif" }, d.title));
+  });
+
+  // словесный слепок: самые отклонённые от базы черты и есть характер
+  const off = spec.map(d => ({ d, i: ch[d.key], dist: Math.abs(ch[d.key] - (d.default ?? 2)) }))
+                  .sort((a, b) => b.dist - a.dist);
+  const lead = off.filter(x => x.dist > 0).slice(0, 3)
+                  .map(x => (PT_WORDS[x.d.key] || [])[x.i] || (x.d.levels[x.i] || {}).label)
+                  .filter(Boolean);
+  const changed = off.filter(x => x.dist > 0).length;
+  const tags = spec.map(d => e("span", { class:"tag",
+    text: `${d.title}: ${(d.levels[ch[d.key]] || {}).label || "?"}` }));
+
+  const box = e("div",{class:"portrait"});
+  box.append(svg, e("div",{class:"pt-word"},
+    e("div",{class:"pt-line",text: lead.length ? lead.join(", ") : "ровно по базовой личности"}),
+    e("div",{class:"pt-sub", text: changed
+      ? `${changed} из ${N} черт отклонены от базовых. крутится ниже — фигура меняется сразу.`
+      : "все черты на базовом уровне: чистый характер из слоёв личности."}),
+    e("div",{class:"pt-tags"}, ...tags)));
+  return card("портрет личности", box);
+}
+
+/* ─── модели: чем думает и кто пишет финал ─── */
+function modelsCard() {
+  const known = (DATA?.known_models) || [];
+  const host = e("div");
+  for (const [key, label] of [["model_chat","черновик · чат"],
+                              ["model_deep","портрет · итоги"],
+                              ["humanizer_model","редактор-голос"]]) {
+    const cur = (DATA?.models || {})[key] || "";
+    const sel = e("select");
+    const ids = known.map(m => m.id);
+    if (cur && !ids.includes(cur)) ids.unshift(cur);
+    ids.forEach(id => {
+      const o = e("option",{value:id,text:id});
+      if (id === cur) o.setAttribute("selected","selected");
+      sel.append(o);
+    });
+    const note = e("div",{class:"mnote",text:(known.find(m => m.id === cur) || {}).note || ""});
+    sel.onchange = async () => {
+      try { await api("/api/admin/config", { key, value: sel.value });
+            DATA.models[key] = sel.value;
+            note.textContent = (known.find(m => m.id === sel.value) || {}).note || "";
+            flash(note, " применено ✓"); }
+      catch (err) { flash(note, " ошибка: " + err.message, true); }
+    };
+    host.append(e("div",{class:"mrow"}, e("span",{class:"mk",text:label}), sel, note));
+  }
+  const on = (DATA?.models || {}).humanize_on === "1";
+  const sw = e("div",{class:"switch"});
+  const msg = e("span",{class:"mnote"});
+  [["1","включён"],["0","выключен"]].forEach(([v,t]) => {
+    const b = e("button",{text:t,onclick:async()=>{
+      try { await api("/api/admin/config", { key:"humanize_on", value:v });
+            DATA.models.humanize_on = v;
+            [...sw.children].forEach(x => x.setAttribute("aria-selected", String(x === b)));
+            flash(msg, " применено ✓"); }
+      catch (err) { flash(msg, " ошибка: " + err.message, true); }
+    }});
+    b.setAttribute("aria-selected", String((v === "1") === on));
+    sw.append(b);
+  });
+  host.append(e("div",{class:"mrow"}, e("span",{class:"mk",text:"второй проход"}), sw, msg));
+  return card("модели", e("div",{class:"sub",
+    text:"черновик считает первая модель, финал клиенту пишет редактор. выключишь второй проход — почерк модели вылезет сразу."}), host);
+}
+
+/* ─── слои: порядок решает, что перевесит при конфликте ─── */
+function layersCard() {
+  const layers = (DATA?.layers) || [];
+  if (!layers.length) return null;
+  const host = e("div");
+  let order = layers.map(l => l.file);
+  let dragged = null;
+
+  const save = async () => {
+    try { await api("/api/admin/config", { key:"layers_order", value: JSON.stringify(order) });
+          flash(host, "порядок сохранён ✓"); }
+    catch (err) { flash(host, "ошибка: " + err.message, true); }
+  };
+  const paint = () => {
+    host.replaceChildren();
+    order.forEach((file, idx) => {
+      const l = layers.find(x => x.file === file) || { title:file, chars:0 };
+      const row = e("div",{class:"layer",draggable:"true"},
+        e("span",{class:"grip",text:"⠿"}),
+        e("span",{class:"num",text:String(idx + 1)}),
+        e("span",{class:"lt"}, e("div",{text:l.title}), e("div",{class:"lf",text:file})),
+        e("span",{class:"lc",text:(l.chars / 1000).toFixed(1) + "к"}));
+      row.addEventListener("dragstart", ev => {
+        dragged = file; row.classList.add("drag"); ev.dataTransfer.effectAllowed = "move";
+      });
+      row.addEventListener("dragend", () => {
+        dragged = null; row.classList.remove("drag");
+        host.querySelectorAll(".layer").forEach(x => x.classList.remove("over"));
+      });
+      row.addEventListener("dragover", ev => { ev.preventDefault(); row.classList.add("over"); });
+      row.addEventListener("dragleave", () => row.classList.remove("over"));
+      row.addEventListener("drop", ev => {
+        ev.preventDefault();
+        if (!dragged || dragged === file) return;
+        order = order.filter(x => x !== dragged);
+        order.splice(order.indexOf(file), 0, dragged);
+        paint(); save();
+      });
+      host.append(row);
+    });
+    host.append(e("div",{class:"acts"},
+      e("button",{class:"b ghost",text:"вернуть порядок из файла",onclick:async()=>{
+        try { await api("/api/admin/config", { key:"layers_order", value:"" });
+              flash(host, "вернул ✓"); setTimeout(() => location.reload(), 700); }
+        catch (err) { flash(host, "ошибка: " + err.message, true); }
+      }})));
+  };
+  paint();
+  return card("слои личности", e("div",{class:"sub",
+    text:"перетаскивай — так собирается системный промпт. поздний слой уточняет ранние, и хвост промпта модель держит вниманием сильнее."}), host);
+}
+
 /* ручки характера: смысловые шкалы вместо правки сырого текста */
 function dialsCard() {
   const spec = (DATA?.dials?.spec) || [];
@@ -321,7 +557,13 @@ function dialsCard() {
       note.textContent = (d.levels[i]?.label || "") + (i === (d.default ?? 2) ? " · базовый" : "");
     };
     d.levels.forEach((lv, i) => scale.append(e("button",{ class:"seg", title:lv.label,
-      onclick:() => { chosen[d.key] = i; paint(i); save(note); } })));
+      onclick:() => {
+        chosen[d.key] = i; paint(i); save(note);
+        DATA.dials.value = JSON.stringify(chosen);
+        const fresh = portraitCard();                     // портрет пересобираем сразу
+        const old = document.querySelector("#soul .card");
+        if (fresh && old) old.replaceWith(fresh);
+      } })));
     paint(cur);
     host.append(e("div",{class:"dial"},
       e("div",{class:"dial-h"},
@@ -340,10 +582,13 @@ function dialsCard() {
 
 function renderSoul() {
   const s = $("soul"); s.replaceChildren();
-  const dials = dialsCard();
-  if (dials) s.append(dials);
+  // порядок сверху вниз: кто он сейчас → чем думает → из чего собран → чем крутить → сырые тексты
+  const portrait = portraitCard(); if (portrait) s.append(portrait);
+  s.append(modelsCard());
+  const layers = layersCard(); if (layers) s.append(layers);
+  const dials = dialsCard(); if (dials) s.append(dials);
   s.append(card(null, e("div",{class:"sub",
-    text:"тексты живут в файлах config/psychologist/ и подхватываются без перезапуска. правка здесь ложится поверх файла — «вернуть файл» её снимает."})));
+    text:"ниже — сырые тексты. живут в файлах config/psychologist/ и подхватываются без перезапуска. правка здесь ложится поверх файла — «вернуть файл» её снимает."})));
   for (const [cat, title] of Object.entries(CAT)) {
     const list = ITEMS.filter(i => i.cat === cat);
     if (!list.length) continue;
@@ -356,9 +601,9 @@ function renderSoul() {
   }
 }
 
-/* ─── проба: живой диалог на проде-промпте, мимо истории клиента ─── */
-function renderTry() {
-  const s = $("try"); s.replaceChildren();
+/* ─── проба: плавающее окно, доступно с любого экрана ─── */
+function mountProbe() {
+  const body = $("probeBody"); body.replaceChildren();
   const log = e("div",{class:"chat"});
   const inp = e("input",{placeholder:"написать психологу…",autocomplete:"off"});
   const hist = [];
@@ -388,14 +633,23 @@ function renderTry() {
   };
   inp.addEventListener("keydown", ev => { if (ev.key === "Enter") send(); });
 
-  s.append(card("проба голоса",
-    e("div",{class:"sub",text:"тот же промпт и те же модели, что в проде. в историю клиента не пишется."}),
+  body.append(
+    e("div",{class:"sub",text:"текущие настройки и модели. в историю клиента не пишется."}),
     log,
-    e("div",{class:"ask"}, inp, e("button",{class:"b main",text:"→",onclick:send})),
-  ));
+    e("div",{class:"ask"}, inp, e("button",{class:"b main",text:"→",onclick:send})));
+  $("probeClear").onclick = () => { hist.length = 0; log.replaceChildren(); inp.focus(); };
+  return inp;
 }
+let probeInput = null;
+const showProbe = (on) => {
+  $("probe").classList.toggle("hid", !on);
+  $("probeFab").classList.toggle("hid", on);
+  if (on) { if (!probeInput) probeInput = mountProbe(); setTimeout(() => probeInput.focus(), 120); }
+};
+$("probeFab").onclick = () => showProbe(true);
+$("probeHide").onclick = () => showProbe(false);
 
-const VIEWS = { pulse:renderPulse, soul:renderSoul, try:renderTry };
+const VIEWS = { pulse:renderPulse, soul:renderSoul };
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
   for (const v of Object.keys(VIEWS)) $(v).hidden = true;

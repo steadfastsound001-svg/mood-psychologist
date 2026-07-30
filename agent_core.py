@@ -25,6 +25,9 @@ agent_config.register("layer_order", "soul,system_base",
                       "Порядок слоёв в промпте чата",
                       "Через запятую. Перетасуй — меняешь хронологию подачи. Доступно: soul, system_base. Фильтр модели всегда идёт первым.",
                       "order", 0)
+agent_config.register("layers_order", "", "Порядок слоёв личности",
+                      "JSON-массив путей: в каком порядке склеиваются config/psychologist/system/*.md. "
+                      "Порядок значим — поздний слой уточняет ранние. Перетаскивается в панели.", "order", 1)
 agent_config.register("dials", "", "Ручки характера",
                       "JSON вида {\"warmth\": 3}: выбранные уровни шкал из config/psychologist/dials.json. "
                       "Крутится из центра управления, подмешивается отдельным слоем после базовых.", "setting", 2)
