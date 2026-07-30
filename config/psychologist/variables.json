@@ -17,8 +17,8 @@
   },
   "limits": {
     "chat_max_tokens": 700,
-    "bot_chat_max_tokens": 320,
-    "editor_extra_tokens": 200
+    "editor_extra_tokens": 200,
+    "_comment": "chat_max_tokens — один потолок на приложение и Telegram, правится в панели. Отдельного лимита у бота больше нет: два числа расходились, и панель врала про Telegram."
   },
   "toggles": {
     "humanize_on": "1"

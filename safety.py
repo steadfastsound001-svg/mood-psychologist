@@ -135,6 +135,41 @@ def has_number(text: str) -> bool:
     return any(s in tokens for s in short)
 
 
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d[\d\s\-()]{7,}\d)(?!\d)")
+
+
+def scrub_numbers(text: str) -> str:
+    """Выдуманный телефон опаснее отсутствия телефона: человек в кризисе набирает
+    его и попадает в никуда. Правило «давай только из справочника» — просьба, и
+    модель её нарушает, поэтому сверяем в коде.
+
+    Ищем только телефоноподобные цепочки (8+ цифр) — «5-4-3-2-1» и «20 минут»
+    под это не попадают. Незнакомый номер заменяем на настоящий, а не вырезаем:
+    дыра посреди фразы читается хуже и оставляет человека вообще без телефона.
+    """
+    if not text:
+        return text
+    known = {_digits(n)[-10:] for n in _known_numbers() if len(_digits(n)) > 4}
+    if not known:
+        return text
+    fallback = ""
+    for n in _known_numbers():
+        if len(_digits(n)) > 4:
+            fallback = n.strip("-—· ")
+            break
+    if not fallback:
+        return text
+
+    def fix(m: re.Match) -> str:
+        d = _digits(m.group(0))
+        if len(d) < 8 or d[-10:] in known:
+            return m.group(0)
+        print(f"[safety] выдуманный номер в ответе: {m.group(0)!r} → {fallback}", flush=True)
+        return fallback
+
+    return _PHONE_RE.sub(fix, text)
+
+
 def guarantee(text: str, tier: str | None) -> str:
     """В кризисе ответ обязан нести телефон. Нет — дописываем из справочника."""
     if tier not in CRISIS_TIERS or has_number(text):

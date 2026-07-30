@@ -436,7 +436,8 @@ async def stream_reply(
                     full = trim_incomplete(edited)
             except Exception:
                 pass  # редактор не ответил → оставляем черновик
-        full = safety.guarantee(full, tier)   # в кризисе телефон обязан быть
+        # сверка телефонов: выдуманный меняем на настоящий, в кризисе номер обязан быть
+        full = safety.guarantee(safety.scrub_numbers(full), tier)
         await push(full, final=True)
     except Exception as e:
         await push(full + f"\n\n[обрыв стрима: {e}]" if full else f"сломалось: {e}")
@@ -458,19 +459,10 @@ async def stream_reply(
 # ───────────── ask claude (sync, fallback / служебные вызовы) ─────────────
 
 # ───────────── кризис-детектор ─────────────
-
-CRISIS_KEYWORDS = [
-    "не хочу жить", "не хочется жить", "нет смысла жить", "хочу умереть",
-    "лучше бы меня не было", "себе вред", "наложить на себя",
-    "не справляюсь больше", "не могу больше", "панические атаки",
-    "панику не отпускает", "галлюцинации", "слышу голоса",
-    "запил", "запой", "сорвался опять",
-]
-
-
-def detect_crisis(text: str) -> bool:
-    low = text.lower()
-    return any(k in low for k in CRISIS_KEYWORDS)
+# Второго списка ключевых слов здесь больше нет. Он был слабее рабочего лексикона
+# (не переживал «нехочужить» и пассивные маркеры), жил отдельной жизнью и ничем не
+# проверялся. Всё, что он ловил, перенесено в config/psychologist/safety/markers.json
+# и покрыто самопроверкой; детектор один — safety.detect().
 
 
 # ───────────── библиотека техник ─────────────
@@ -864,8 +856,8 @@ class WebHandler(BaseHTTPRequestHandler):
                         system=cached_system(), messages=msgs, max_tokens=cap, task="dialog")).strip())
                     if not draft:
                         raise RuntimeError("модель вернула пустой ответ")
-                    final = safety.guarantee(
-                        trim_incomplete(humanize_text(draft, q, cap + 200)) or draft, tier)
+                    final = safety.guarantee(safety.scrub_numbers(
+                        trim_incomplete(humanize_text(draft, q, cap + 200)) or draft), tier)
                 except Exception as e:
                     final = f"сломалось: {e}"
                 payload = final.encode("utf-8")
@@ -1173,7 +1165,7 @@ async def cmd_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 async def _process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, kind: str) -> None:
     """Общий путь для текста и расшифрованных голосовых. Стримит ответ."""
     await update.message.chat.send_action("typing")
-    crisis = detect_crisis(text)
+    crisis = safety.detect(text) in safety.CRISIS_TIERS
     try:
         loop = asyncio.get_event_loop()
         is_report = len(text) >= 80
@@ -1202,10 +1194,9 @@ async def _process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
             print(f"[sync] не записал в store: {e}", flush=True)
         if is_report and reply:
             write_apple_notes(edited, reply)
-        if crisis:
-            await update.message.reply_text(
-                "📞 если станет хуже: 8-800-2000-122 (бесплатно, круглосуточно) или 112"
-            )
+        # отдельной открытки с телефоном больше нет: номер уже в самом ответе —
+        # safety.guarantee дописывает его, если модель не дала. Второе сообщение
+        # следом читалось как автоответчик ровно там, где нужен живой человек.
         if reply:
             asyncio.create_task(_learn_in_background(text, reply))
     except Exception as e:

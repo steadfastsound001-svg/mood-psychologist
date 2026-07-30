@@ -371,8 +371,14 @@ class Handler(BaseHTTPRequestHandler):
                     system=user_system(prof.get("compiled", ""), insights),
                     messages=messages, max_tokens=cap, task="dialog",
                 )
+            # в кризисе не стримим: сначала сверяем телефоны, потом отдаём целиком.
+            # выдуманный номер, уже уехавший на экран, обратно не заберёшь, а человек
+            # по нему позвонит. пауза в несколько секунд здесь дешевле.
+            hold = tier in safety.CRISIS_TIERS
             for delta in sentence_guard(gen):
                 acc.append(delta)
+                if hold:
+                    continue
                 try:
                     self.wfile.write(delta.encode("utf-8")); self.wfile.flush()
                 except Exception:
@@ -382,16 +388,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"\n[сломалось: {e}]".encode("utf-8"))
             except Exception:
                 pass
-        reply = "".join(acc).strip()
-        # в кризисе телефон обязан быть в ответе. модель могла его не дать — дописываем.
-        fixed = safety.guarantee(reply, tier)
-        if fixed != reply:
+        raw = "".join(acc).strip()
+        # телефоны: выдуманный меняем на настоящий, в кризисе номер обязан быть
+        reply = safety.guarantee(safety.scrub_numbers(raw), tier)
+        if hold:
             try:
-                self.wfile.write(fixed[len(reply):].encode("utf-8")); self.wfile.flush()
+                self.wfile.write(reply.encode("utf-8")); self.wfile.flush()
             except Exception:
                 pass
-            reply = fixed
-            print(f"[safety] uid={uid} tier={tier}: дописал номер в ответ", flush=True)
+        elif reply != raw:
+            # уже отданное не отозвать: клиент приведёт себя к серверному канону
+            # при ближайшей сверке истории (сервер — источник правды).
+            try:
+                self.wfile.write(reply[len(raw):].encode("utf-8")); self.wfile.flush()
+            except Exception:
+                pass
+        if reply != raw:
+            print(f"[safety] uid={uid} tier={tier}: поправил телефоны в ответе", flush=True)
         if reply:
             store.add_message(uid, "user", text)
             store.add_message(uid, "assistant", reply)
