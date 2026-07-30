@@ -606,7 +606,18 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/admin/overview":
             if not self._owner():
                 self._json(403, {"error": "forbidden"}); return
-            self._json(200, {"owner_email": OWNER_EMAIL, "users": store.admin_overview()}); return
+            # состояние личности показываем рядом с людьми: панель должна отвечать
+            # на вопрос «какая версия конфига сейчас разговаривает с клиентом»
+            import psyconfig, safety
+            self._json(200, {
+                "owner_email": OWNER_EMAIL,
+                "users": store.admin_overview(),
+                "config": {**psyconfig.info(), "problems": psyconfig.validate()},
+                "safety": {"markers_ok": not safety.selftest(),
+                           "numbers": len(safety._known_numbers())},
+                "models": {k: agent_config.cfg(k) for k in
+                           ("model_chat", "model_deep", "humanizer_model", "humanize_on")},
+            }); return
         if p == "/api/admin/config":
             if not self._owner():
                 self._json(403, {"error": "forbidden"}); return
