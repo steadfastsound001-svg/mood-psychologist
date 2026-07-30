@@ -28,9 +28,14 @@ MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 import certifi
 from dotenv import load_dotenv
 
+# .env читаем ДО импортов проекта. store решает «Turso или локальный sqlite» в момент
+# импорта: если ключи Turso ещё не в окружении, бот молча уходит в local-БД, и тогда
+# сессии, диалоги и дневник расходятся с приложением. Порядок здесь критичен.
+load_dotenv(Path(__file__).parent / ".env", override=True)
+os.environ.setdefault("PSY_ROLE", "bot")   # в TG психолог обращается по имени
+
 from llm import (Anthropic, stream_completion, stream_completion_sync,
                  trim_incomplete, humanize_text)  # OpenRouter-обёртка
-os.environ.setdefault("PSY_ROLE", "bot")   # в TG психолог обращается по имени
 import psyconfig
 import safety
 import agent_config
@@ -73,8 +78,6 @@ FFMPEG_BIN = (
 )
 print(f"[boot] PATH={os.environ['PATH']}", flush=True)
 print(f"[boot] FFMPEG_BIN={FFMPEG_BIN}", flush=True)
-
-load_dotenv(Path(__file__).parent / ".env", override=True)
 
 TG_TOKEN = os.environ["TELEGRAM_TOKEN"]
 USER_ID = int(os.environ["TELEGRAM_USER_ID"])
@@ -1113,7 +1116,8 @@ def start_web_server() -> None:
         return
     try:
         store.init_db()
-        print("[web] sqlite готова", flush=True)
+        # печатаем, КУДА пишем: локальная БД вместо Turso = тихий разрыв с приложением
+        print(f"[web] БД: {'Turso (общая с приложением)' if store._turso_on() else 'ЛОКАЛЬНАЯ sqlite — синка с приложением НЕТ'}", flush=True)
     except Exception as e:
         print(f"[web] sqlite init failed: {e}", flush=True)
     # порт занят прежним инстансом → НЕ роняем бота: Telegram-поллинг важнее Mini App.
