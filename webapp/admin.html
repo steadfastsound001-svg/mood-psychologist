@@ -164,6 +164,49 @@ button.b.ghost{background:transparent;color:var(--dim)}
 .empty{color:var(--faint);font-size:13px;padding:14px 2px}
 a{color:var(--accent);text-decoration:none}
 
+/* полоса сохранения: пока она видна — правки живут только в браузере */
+#saveBar{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:70;
+  width:min(700px,calc(100vw - 32px));display:flex;align-items:center;gap:14px;
+  padding:13px 16px;transition:opacity .3s,transform .38s cubic-bezier(.32,.72,0,1);
+}
+#saveBar.hid{opacity:0;pointer-events:none;transform:translateX(-50%) translateY(16px)}
+.sb-l{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.sb-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 auto;
+  box-shadow:0 0 10px var(--accent);animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.sb-dot{animation:none}}
+.sb-txt{font-size:12.5px;min-width:0;overflow:hidden}
+.sb-txt b{display:block;font-size:13px;font-weight:600}
+.sb-txt span{color:var(--dim);font-size:11px;display:block;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.sb-r{display:flex;gap:8px;flex:0 0 auto}
+#savedFlash{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:70;
+  padding:12px 22px;font:600 13px Manrope,sans-serif;color:var(--accent-2);
+  transition:opacity .3s
+}
+#savedFlash.hid{opacity:0;pointer-events:none}
+
+/* загрузка: контент под матовым стеклом, пока данные в пути */
+.wrap.loading{filter:blur(9px) saturate(.7);opacity:.5;pointer-events:none;
+  transition:filter .45s cubic-bezier(.32,.72,0,1),opacity .45s}
+.wrap{transition:filter .45s cubic-bezier(.32,.72,0,1),opacity .45s}
+#loader{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:15px;pointer-events:none;
+  transition:opacity .4s}
+#loader.hid{opacity:0}
+.ldr-ring{width:34px;height:34px;border-radius:50%;
+  border:2px solid rgba(192,160,128,.18);border-top-color:var(--accent);
+  animation:spin .85s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ldr-txt{font-size:12.5px;color:var(--dim);letter-spacing:.3px}
+@media (prefers-reduced-motion:reduce){.ldr-ring{animation-duration:2.4s}}
+@media(max-width:560px){
+  #saveBar{bottom:82px;flex-wrap:wrap}
+  #probeFab,#probe{bottom:10px}
+}
+
 /* портрет личности: радар по ручкам + словесный слепок */
 .portrait{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
 .portrait svg{flex:0 0 190px;width:190px;height:190px}
@@ -232,7 +275,12 @@ a{color:var(--accent);text-decoration:none}
 </style>
 </head>
 <body>
-<div class="wrap">
+<div id="loader">
+  <div class="ldr-ring"></div>
+  <div class="ldr-txt" id="ldrTxt">собираю личность…</div>
+</div>
+
+<div class="wrap loading">
   <header>
     <h1>центр управления</h1>
     <div class="sub" id="sub">загружаю…</div>
@@ -246,6 +294,18 @@ a{color:var(--accent);text-decoration:none}
   <section id="pulse"></section>
   <section id="soul" hidden></section>
 </div>
+
+<div id="saveBar" class="glass hid">
+  <div class="sb-l">
+    <span class="sb-dot"></span>
+    <span class="sb-txt"><b id="saveCount"></b><span id="saveWhat"></span></span>
+  </div>
+  <div class="sb-r">
+    <button class="b ghost" id="discardBtn">отменить</button>
+    <button class="b main" id="saveBtn">применить</button>
+  </div>
+</div>
+<div id="savedFlash" class="glass hid">сохранено ✓</div>
 
 <button id="probeFab">проба голоса</button>
 <div id="probe" class="glass hid">
@@ -310,6 +370,70 @@ const ago = (ts) => {
 
 let DATA = null, ITEMS = [];
 
+/* ── Черновик правок ────────────────────────────────────────────────
+   Раньше каждый клик улетал в прод мгновенно: неясно, что сохранено,
+   и случайное касание меняло психолога прямо посреди чужого разговора.
+   Теперь правки копятся здесь, портрет обновляется сразу (превью),
+   а в прод уходит по кнопке. Ctrl/Cmd+S тоже сохраняет. */
+const PENDING = new Map();          // ключ конфига → новое значение
+const ORIGINAL = new Map();         // ключ → значение на момент загрузки (для отмены)
+
+function stage(key, value, label) {
+  if (!ORIGINAL.has(key)) ORIGINAL.set(key, (DATA?.__cfg || {})[key] ?? null);
+  PENDING.set(key, { value, label: label || key });
+  paintSaveBar();
+}
+function isDirty() { return PENDING.size > 0; }
+
+function paintSaveBar() {
+  const bar = $("saveBar");
+  const n = PENDING.size;
+  bar.classList.toggle("hid", n === 0);
+  if (!n) return;
+  const t = n % 10, h = n % 100;
+  const word = (t === 1 && h !== 11) ? "изменение"
+             : (t >= 2 && t <= 4 && (h < 12 || h > 14)) ? "изменения" : "изменений";
+  $("saveCount").textContent = `${n} ${word}`;
+  $("saveWhat").textContent = [...PENDING.values()].map(x => x.label).join(" · ");
+}
+
+async function applyPending() {
+  const btn = $("saveBtn");
+  btn.disabled = true; btn.textContent = "сохраняю…";
+  const failed = [];
+  for (const [key, { value }] of PENDING) {
+    try { await api("/api/admin/config", { key, value }); }
+    catch (err) { failed.push(`${key}: ${err.message}`); }
+  }
+  btn.disabled = false; btn.textContent = "применить";
+  if (failed.length) {
+    $("saveWhat").textContent = "не сохранилось — " + failed.join("; ");
+    return;
+  }
+  PENDING.clear(); ORIGINAL.clear();
+  paintSaveBar();
+  const s = $("savedFlash");
+  s.classList.remove("hid");
+  setTimeout(() => s.classList.add("hid"), 2200);
+  await reload("применяю…");         // перечитываем канон — без догадок о состоянии
+}
+
+function discardPending() {
+  PENDING.clear(); ORIGINAL.clear();
+  paintSaveBar();
+  location.reload();
+}
+
+document.addEventListener("keydown", (ev) => {
+  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "s") {
+    ev.preventDefault();
+    if (isDirty()) applyPending();
+  }
+});
+window.addEventListener("beforeunload", (ev) => {
+  if (isDirty()) { ev.preventDefault(); ev.returnValue = ""; }
+});
+
 /* ─── пульс: что происходит прямо сейчас ─── */
 function renderPulse() {
   const s = $("pulse"); s.replaceChildren();
@@ -361,18 +485,15 @@ function editor(it) {
   const ta = e("textarea",{rows:String(Math.min(18, Math.max(4, text.split("\n").length + 1)))});
   ta.value = text;
   const acts = e("div",{class:"acts"});
-  const save = e("button",{class:"b main",text:"сохранить",onclick:async()=>{
-    try { await api("/api/admin/config", {key:it.key, value:ta.value});
-          it.value = ta.value; it.overridden = true; mark(it); flash(acts,"сохранено ✓"); }
-    catch (err) { flash(acts, "ошибка: " + err.message, true); }
+  ta.addEventListener("input", () => {
+    it.value = ta.value; it.overridden = true; mark(it);
+    stage(it.key, ta.value, it.label);
+  });
+  const reset = e("button",{class:"b ghost",text:"вернуть файл",onclick:()=>{
+    ta.value = it.default || ""; it.value = ""; it.overridden = false; mark(it);
+    stage(it.key, "", it.label + ": из файла");
   }});
-  const reset = e("button",{class:"b ghost",text:"вернуть файл",onclick:async()=>{
-    try { await api("/api/admin/config", {key:it.key, value:""});
-          ta.value = it.default || ""; it.value = ""; it.overridden = false; mark(it);
-          flash(acts,"вернул из файла ✓"); }
-    catch (err) { flash(acts, "ошибка: " + err.message, true); }
-  }});
-  acts.append(save, reset);
+  acts.append(reset, e("span",{class:"mnote",text:"правки уходят в черновик — примени внизу"}));
   return e("div", {}, ta, acts);
 }
 /* ─── портрет: сумма настроек одним взглядом ─── */
@@ -498,25 +619,22 @@ function modelsCard() {
     });
     const note = e("div",{class:"mnote",text:(known.find(m => m.id === cur) || {}).note || ""});
     sel.onchange = async () => {
-      try {
-        // «не назначен» для редактора = снять второй проход. Пустая строка в конфиге
-        // означает «сброс к файлу», поэтому вакансию выражаем тумблером humanize_on.
-        if (key === "humanizer_model" && !sel.value) {
-          await api("/api/admin/config", { key:"humanize_on", value:"0" });
-          DATA.models.humanize_on = "0";
-          note.textContent = "второй проход снят — финал пишет сама модель черновика";
-        } else {
-          await api("/api/admin/config", { key, value: sel.value });
-          DATA.models[key] = sel.value;
-          note.textContent = (known.find(m => m.id === sel.value) || {}).note || "";
-          if (key === "humanizer_model") {
-            await api("/api/admin/config", { key:"humanize_on", value:"1" });
-            DATA.models.humanize_on = "1";
-          }
+      // «не назначен» для редактора = снять второй проход. Пустая строка в конфиге
+      // означает «сброс к файлу», поэтому вакансию выражаем тумблером humanize_on.
+      if (key === "humanizer_model" && !sel.value) {
+        DATA.models.humanize_on = "0";
+        stage("humanize_on", "0", "редактор снят");
+        note.textContent = "второй проход снят — финал пишет сама модель черновика";
+      } else {
+        DATA.models[key] = sel.value;
+        stage(key, sel.value, label);
+        note.textContent = (known.find(m => m.id === sel.value) || {}).note || "";
+        if (key === "humanizer_model") {
+          DATA.models.humanize_on = "1";
+          stage("humanize_on", "1", "редактор назначен");
         }
-        renderSoul();                       // перерисовываем: изменился и портрет, и тумблер
-        flash(note, " применено ✓");
-      } catch (err) { flash(note, " ошибка: " + err.message, true); }
+      }
+      renderSoul();
     };
     host.append(e("div",{class:"mrow"}, e("span",{class:"mk",text:label}), sel, note));
   }
@@ -524,12 +642,11 @@ function modelsCard() {
   const sw = e("div",{class:"switch"});
   const msg = e("span",{class:"mnote"});
   [["1","включён"],["0","выключен"]].forEach(([v,t]) => {
-    const b = e("button",{text:t,onclick:async()=>{
-      try { await api("/api/admin/config", { key:"humanize_on", value:v });
-            DATA.models.humanize_on = v;
-            [...sw.children].forEach(x => x.setAttribute("aria-selected", String(x === b)));
-            refreshPortrait(); flash(msg, " применено ✓"); }
-      catch (err) { flash(msg, " ошибка: " + err.message, true); }
+    const b = e("button",{text:t,onclick:()=>{
+      DATA.models.humanize_on = v;
+      stage("humanize_on", v, "второй проход: " + t);
+      [...sw.children].forEach(x => x.setAttribute("aria-selected", String(x === b)));
+      refreshPortrait();
     }});
     b.setAttribute("aria-selected", String((v === "1") === on));
     sw.append(b);
@@ -547,11 +664,7 @@ function layersCard() {
   let order = layers.map(l => l.file);
   let dragged = null;
 
-  const save = async () => {
-    try { await api("/api/admin/config", { key:"layers_order", value: JSON.stringify(order) });
-          flash(host, "порядок сохранён ✓"); }
-    catch (err) { flash(host, "ошибка: " + err.message, true); }
-  };
+  const save = () => stage("layers_order", JSON.stringify(order), "порядок слоёв");
   const paint = () => {
     host.replaceChildren();
     order.forEach((file, idx) => {
@@ -582,10 +695,11 @@ function layersCard() {
       host.append(row);
     });
     host.append(e("div",{class:"acts"},
-      e("button",{class:"b ghost",text:"вернуть порядок из файла",onclick:async()=>{
-        try { await api("/api/admin/config", { key:"layers_order", value:"" });
-              flash(host, "вернул ✓"); setTimeout(() => location.reload(), 700); }
-        catch (err) { flash(host, "ошибка: " + err.message, true); }
+      e("button",{class:"b ghost",text:"вернуть порядок из файла",onclick:()=>{
+        order = layers.map(l => l.file);
+        DATA.layers = layers.slice();
+        stage("layers_order", "", "порядок слоёв: из файла");
+        paint(); refreshPortrait();
       }})));
   };
   paint();
@@ -601,10 +715,9 @@ function dialsCard() {
   try { chosen = JSON.parse(DATA.dials.value || "{}") || {}; } catch (_) {}
 
   const host = e("div");
-  const save = async (msgHost) => {
-    try { await api("/api/admin/config", { key:"dials", value: JSON.stringify(chosen) });
-          DATA.dials.value = JSON.stringify(chosen); flash(msgHost, "применено ✓"); }
-    catch (err) { flash(msgHost, "ошибка: " + err.message, true); }
+  const save = () => {
+    DATA.dials.value = JSON.stringify(chosen);       // портрет считаем от черновика
+    stage("dials", JSON.stringify(chosen), "характер");
   };
 
   for (const d of spec) {
@@ -629,8 +742,8 @@ function dialsCard() {
       scale, note));
   }
   const acts = e("div",{class:"acts"},
-    e("button",{class:"b ghost",text:"вернуть базовые",onclick:async(ev)=>{
-      chosen = {}; await save(ev.target.parentNode); renderSoul();
+    e("button",{class:"b ghost",text:"вернуть базовые",onclick:()=>{
+      chosen = {}; save(); renderSoul();
     }}));
   host.append(acts);
   return card("характер", e("div",{class:"sub",
@@ -673,9 +786,18 @@ function mountProbe() {
     const meta = e("div",{class:"meta"});
     log.append(out, meta); log.scrollTop = log.scrollHeight;
     const t0 = performance.now();
+    // ответ может считаться десятки секунд (Opus думает) — показываем счётчик,
+    // иначе окно выглядит зависшим
+    const tick = setInterval(() => {
+      meta.textContent = `думает… ${((performance.now() - t0)/1000).toFixed(0)}с`;
+    }, 500);
     try {
-      const r = await fetch("/api/admin/test-chat", {method:"POST", headers:H,
+      const ctl = new AbortController();
+      const killer = setTimeout(() => ctl.abort(), 120000);
+      const r = await fetch("/api/admin/test-chat", {method:"POST", headers:H, signal:ctl.signal,
         body:JSON.stringify({q, history:hist, model:"", overrides:{}})});
+      clearTimeout(killer);
+      if (!r.ok) throw new Error("сервер ответил " + r.status);
       const rd = r.body.getReader(), dec = new TextDecoder();
       let acc = "";
       for (;;) {
@@ -684,9 +806,18 @@ function mountProbe() {
         acc += dec.decode(value, {stream:true});
         out.textContent = acc; log.scrollTop = log.scrollHeight;
       }
+      clearInterval(tick);
       hist.push({role:"user", content:q}, {role:"assistant", content:acc});
       meta.textContent = `${((performance.now() - t0)/1000).toFixed(1)}с · ${acc.length} символов`;
-    } catch (err) { out.textContent = "сломалось: " + err.message; }
+    } catch (err) {
+      clearInterval(tick);
+      const why = err.name === "AbortError" ? "модель думала дольше двух минут"
+        : /Failed to fetch|NetworkError|Load failed/i.test(err.message)
+          ? "связь с ботом пропала — он мог перезапускаться. попробуй ещё раз"
+          : err.message;
+      out.textContent = "не ответил: " + why;
+      meta.textContent = "";
+    }
   };
   inp.addEventListener("keydown", ev => { if (ev.key === "Enter") send(); });
 
@@ -706,6 +837,31 @@ const showProbe = (on) => {
 $("probeFab").onclick = () => showProbe(true);
 $("probeHide").onclick = () => showProbe(false);
 
+/* перечитать канон с сервера и перерисовать текущий экран */
+const setLoading = (on, txt) => {
+  document.querySelector(".wrap").classList.toggle("loading", on);
+  $("loader").classList.toggle("hid", !on);
+  if (txt) $("ldrTxt").textContent = txt;
+};
+
+async function reload(txt) {
+  setLoading(true, txt || "собираю личность…");
+  try {
+    await reloadInner();
+  } finally { setLoading(false); }
+}
+
+async function reloadInner() {
+  const [ov, cfg] = await Promise.all([api("/api/admin/overview"), api("/api/admin/config")]);
+  DATA = ov; ITEMS = cfg.items || [];
+  $("sub").textContent = `${ov.owner_email} · конфиг v${(ov.config || {}).version || "?"}`;
+  const active = document.querySelector('nav button[aria-selected="true"]');
+  VIEWS[active ? active.dataset.v : "pulse"]();
+}
+
+$("saveBtn").onclick = applyPending;
+$("discardBtn").onclick = discardPending;
+
 const VIEWS = { pulse:renderPulse, soul:renderSoul };
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
@@ -715,13 +871,15 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 });
 
 (async () => {
-  if (!token) { $("sub").textContent = "нет токена — войди в приложении и вернись сюда"; return; }
+  if (!token) {
+    setLoading(false);
+    $("sub").textContent = "нет токена — открой ссылку из /panel в боте";
+    return;
+  }
   try {
-    const [ov, cfg] = await Promise.all([api("/api/admin/overview"), api("/api/admin/config")]);
-    DATA = ov; ITEMS = cfg.items || [];
-    $("sub").textContent = `${ov.owner_email} · конфиг v${(ov.config || {}).version || "?"}`;
-    renderPulse();
+    await reload();
   } catch (err) {
+    setLoading(false);
     $("sub").textContent = String(err.message).includes("403")
       ? "доступ только владельцу" : "не загрузилось: " + err.message;
   }

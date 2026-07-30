@@ -90,6 +90,39 @@ def query(sql: str, params: tuple = ()) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def query_many(queries: list[tuple]) -> list[list[dict]]:
+    """Пачка SELECT-ов за ОДИН сетевой round-trip.
+
+    Turso ходит по HTTP: шесть отдельных query — это шесть перелётов туда-обратно
+    (на сводке админки выходило ~9 секунд). Pipeline умеет принять их разом.
+    На локальном sqlite просто выполняем подряд — там round-trip нет.
+    """
+    if not queries:
+        return []
+    if not _turso_on():
+        return [query(sql, params) for sql, params in queries]
+
+    import httpx
+    reqs = [{"type": "execute", "stmt": {"sql": sql, "args": [_to_arg(p) for p in params]}}
+            for sql, params in queries]
+    reqs.append({"type": "close"})
+    with httpx.Client(timeout=30) as cli:
+        r = cli.post(_turso_http(TURSO_URL) + "/v2/pipeline",
+                     json={"requests": reqs}, headers={"Authorization": "Bearer " + TURSO_TOKEN})
+        r.raise_for_status()
+        data = r.json()
+    out = []
+    for i in range(len(queries)):
+        res = data["results"][i]
+        if res.get("type") != "ok":
+            raise RuntimeError("turso: " + str(res))
+        result = res["response"]["result"]
+        cols = [c["name"] for c in result.get("cols", [])]
+        out.append([{cols[j]: _from_val(cell) for j, cell in enumerate(row)}
+                    for row in result.get("rows", [])])
+    return out
+
+
 def execute(sql: str, params: tuple = ()) -> int | None:
     if _turso_on():
         _, last = _turso_exec(sql, params)
@@ -549,14 +582,18 @@ def recent_messages(user_id: int, limit: int = 30) -> list[dict]:
 
 def admin_overview() -> list[dict]:
     """Сводка по всем аккаунтам: почта, активность, объёмы. Несколько GROUP BY вместо N запросов."""
-    users = query("SELECT id, email, name, created_at FROM users ORDER BY id")
+    # один round-trip вместо шести: по сети это разница между ~9с и ~1.5с
+    users, m_rows, u_rows, d_rows, doc_rows, p_rows = query_many([
+        ("SELECT id, email, name, created_at FROM users ORDER BY id", ()),
+        ("SELECT user_id, COUNT(*) c, MAX(ts) last FROM messages GROUP BY user_id", ()),
+        ("SELECT user_id, COUNT(*) c FROM messages WHERE role='user' GROUP BY user_id", ()),
+        ("SELECT user_id, COUNT(*) c, MAX(ts) last FROM diary_entries GROUP BY user_id", ()),
+        ("SELECT user_id, COUNT(*) c, COALESCE(SUM(size),0) s FROM documents GROUP BY user_id", ()),
+        ("SELECT user_id, LENGTH(compiled) pc, onboarded FROM profiles", ()),
+    ])
     def idx(rows):
         return {r["user_id"]: r for r in rows}
-    msgs = idx(query("SELECT user_id, COUNT(*) c, MAX(ts) last FROM messages GROUP BY user_id"))
-    umsg = idx(query("SELECT user_id, COUNT(*) c FROM messages WHERE role='user' GROUP BY user_id"))
-    diary = idx(query("SELECT user_id, COUNT(*) c, MAX(ts) last FROM diary_entries GROUP BY user_id"))
-    docs = idx(query("SELECT user_id, COUNT(*) c, COALESCE(SUM(size),0) s FROM documents GROUP BY user_id"))
-    prof = idx(query("SELECT user_id, LENGTH(compiled) pc, onboarded FROM profiles"))
+    msgs, umsg, diary, docs, prof = (idx(m_rows), idx(u_rows), idx(d_rows), idx(doc_rows), idx(p_rows))
     out = []
     for u in users:
         uid = u["id"]

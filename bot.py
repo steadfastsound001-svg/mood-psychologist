@@ -834,18 +834,24 @@ class WebHandler(BaseHTTPRequestHandler):
                 msgs.append({"role": "user", "content": q})
                 tier = safety.detect(q)
                 cap = safety.policy_for(tier, agent_config.cfg_int("chat_max_tokens", 700))["max_tokens"]
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
+                # ответ считаем ДО отправки заголовков: иначе при сбое модели клиент
+                # получает пустой 200 и «Failed to fetch» вместо внятной причины.
                 try:
                     draft = trim_incomplete("".join(stream_completion_sync(
                         system=cached_system(), messages=msgs, max_tokens=cap, task="dialog")).strip())
+                    if not draft:
+                        raise RuntimeError("модель вернула пустой ответ")
                     final = safety.guarantee(
                         trim_incomplete(humanize_text(draft, q, cap + 200)) or draft, tier)
-                    self.wfile.write(final.encode("utf-8"))
                 except Exception as e:
-                    self.wfile.write(f"сломалось: {e}".encode("utf-8"))
+                    final = f"сломалось: {e}"
+                payload = final.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
                 return
 
             if url.path == "/api/v2/chat":

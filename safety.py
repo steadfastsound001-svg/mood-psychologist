@@ -146,9 +146,20 @@ def guarantee(text: str, tier: str | None) -> str:
     return text.rstrip() + tail
 
 
+_selftest_cache: tuple | None = None      # (отпечаток лексикона, результат)
+
+
 def selftest() -> list[str]:
     """Прогон канонических фраз из конфига. Битый лексикон выглядит в метриках
-    как затишье, поэтому проверяется при загрузке."""
+    как затишье, поэтому проверяется при загрузке.
+
+    Результат кэшируется по самому лексикону: панель дёргает его на каждый запрос,
+    а прогон 12 фраз по всем tier'ам стоит ощутимо дороже, чем сравнение строк.
+    """
+    global _selftest_cache
+    raw = psyconfig.get("markers") or ""
+    if _selftest_cache and _selftest_cache[0] == raw:
+        return _selftest_cache[1]
     cfg = _markers()
     problems = []
     for case in cfg.get("selftest", []):
@@ -156,6 +167,7 @@ def selftest() -> list[str]:
         want = case.get("tier")
         if got != want:
             problems.append(f"детектор: {case.get('text')!r} → {got}, ожидалось {want}")
+    _selftest_cache = (raw, problems)
     return problems
 
 
