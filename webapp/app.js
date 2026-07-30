@@ -545,6 +545,13 @@ function setupSwipe() {
     $("profileView").hidden = curView !== "profile";
   };
 
+  /* смаз на жесте: уходящая вью расфокусируется по мере ухода, входящая наводится
+     на резкость. blur считаем от пройденного пути — «доводка фокуса» за пальцем.
+     reduce-motion выключает: постоянный пересчёт blur укачивает сильнее слайда. */
+  const BLUR_MAX = 7;
+  const calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const focus = (el, px) => { if (!calm && el) el.style.filter = px > 0.05 ? `blur(${px.toFixed(2)}px)` : ""; };
+
   app.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) { locked = "v"; return; }
     if (e.target.closest("input, textarea, .mood-chart, .trend-wrap, .diary-menu, .test-modal, .test-sheet, .pf-box")) { locked = "v"; return; }
@@ -568,6 +575,7 @@ function setupSwipe() {
       from.classList.add("swipe-layer"); to.classList.add("swipe-layer");
       from.style.transform = `translate(0px, ${-fromScroll}px)`;
       to.style.transform = `translateX(${sign * vw}px)`;
+      focus(from, 0); focus(to, BLUR_MAX);
     }
     if (locked === "h") {
       e.preventDefault();
@@ -577,6 +585,8 @@ function setupSwipe() {
       if (past !== crossed) { crossed = past; hapticSel(); }           // тактильная засечка на пороге
       from.style.transform = `translate(${d}px, ${-fromScroll}px)`;
       to.style.transform = `translateX(${sign * vw + d}px)`;
+      const p = Math.min(1, Math.abs(d) / vw);
+      focus(from, BLUR_MAX * p); focus(to, BLUR_MAX * (1 - p));
     }
   }, { passive: false });
 
@@ -589,10 +599,12 @@ function setupSwipe() {
     fEl.classList.add("animate"); tEl.classList.add("animate");
     fEl.style.transform = `translate(${commit ? -s * vw : 0}px, ${-fs}px)`;
     tEl.style.transform = `translateX(${commit ? 0 : s * vw}px)`;
+    focus(fEl, commit ? BLUR_MAX : 0); focus(tEl, commit ? 0 : BLUR_MAX);   // доводка фокуса тем же переходом
     if (commit) haptic();
     setTimeout(() => {
       fEl.classList.remove("swipe-layer", "animate"); tEl.classList.remove("swipe-layer", "animate");
       fEl.style.transform = ""; tEl.style.transform = "";
+      fEl.style.filter = ""; tEl.style.filter = "";
       if (commit && target) switchView(target, false);
       else window.scrollTo(0, fs);                                      // отмена — вернуть прокрутку на место
       reHide();
@@ -603,7 +615,9 @@ function setupSwipe() {
   // iOS может оборвать жест (системный свайп/конфликт скролла) без touchend —
   // тогда вью оставалась бы как swipe-layer, сдвинутая за экран («страницы не видно»). сбрасываем.
   const cancelSwipe = () => {
-    [from, to].forEach((el) => { if (el) { el.classList.remove("swipe-layer", "animate"); el.style.transform = ""; } });
+    [from, to].forEach((el) => {
+      if (el) { el.classList.remove("swipe-layer", "animate"); el.style.transform = ""; el.style.filter = ""; }
+    });
     reHide();
     locked = null; dragging = false; from = to = null;
   };
@@ -651,22 +665,38 @@ function loadChat() { try { return JSON.parse(localStorage.getItem(CHAT_KEY()) |
 function saveChat(a) { try { localStorage.setItem(CHAT_KEY(), JSON.stringify(a.slice(-100))); } catch (_) {} }
 
 /* сверка с серверным каноном БЕЗ потери локального хвоста.
-   сервер пишет ответ в БД только после полного ответа (~10с) — до этого наше свежее
-   сообщение есть только локально. слепой overwrite его стирал → «сбилось, потом появилось».
-   принимаем сервер ТОЛЬКО если он впереди (содержит локалку как префикс). */
+   БД — единственный источник правды. Локалка ценна ровно одним: хвостом, которого
+   сервер ещё не записал (отправлено секунду назад, ответ дописался, связь упала).
+   Всё остальное берём с сервера — так локальный мусор не живёт вечно.
+
+   Сверяем ПО ТЕКСТУ, без роли. Реплика психолога, осевшая в локалке как сообщение
+   клиента (её оставляла старая версия done(), писавшая ответ в чужую ячейку),
+   иначе воскресала при каждом опросе: роль «user» — значит хвост, значит дописать
+   заново после сервера. По тексту она совпадает с каноном и отсекается. */
+/* chatMerge:start — чистая функция, её же гоняет webapp/chatmerge.test.js */
 const _chatSig = (a) => JSON.stringify((a || []).map((m) => [m.role, m.text]));
-function _chatIsPrefix(a, b) { return a.length <= b.length && _chatSig(a) === _chatSig(b.slice(0, a.length)); }
-function reconcileChat(serverArr) {
-  const local = loadChat();
-  if (_chatSig(serverArr) === _chatSig(local)) return false;     // совпало
-  if (_chatIsPrefix(serverArr, local)) return false;             // локалка впереди (pending/fail) — не трогаем
-  if (_chatIsPrefix(local, serverArr)) { saveChat(serverArr); return true; }  // сервер впереди — принять (напр. из ТГ)
-  // расхождение в середине (кросс-девайс) → берём сервер, но не теряем незавершённый локальный user-хвост
+const _chatText = (m) => ((m && m.text) || "").trim();
+function chatMerge(server, local) {
+  server = server || []; local = local || [];
+  if (_chatSig(server) === _chatSig(local)) return null;          // совпало
+  const known = new Set(server.map(_chatText));
   let i = local.length - 1;
-  if (i >= 0 && local[i].role === "agent" && !(local[i].text || "").trim()) i--;  // пропустить пустой стрим-агент
+  const streamCell = (i >= 0 && !_chatText(local[i])) ? [local[i--]] : [];  // ячейка идущего стрима
   const tail = [];
-  for (; i >= 0 && local[i].role === "user"; i--) tail.unshift(local[i]);
-  saveChat(serverArr.concat(tail));
+  for (; i >= 0; i--) {
+    const t = _chatText(local[i]);
+    if (!t || known.has(t)) break;                                // дошли до общей части
+    tail.unshift(local[i]);
+  }
+  const next = server.concat(tail, streamCell);
+  return _chatSig(next) === _chatSig(local) ? null : next;
+}
+/* chatMerge:end */
+
+function reconcileChat(serverArr) {
+  const next = chatMerge(serverArr, loadChat());
+  if (!next) return false;
+  saveChat(next);
   return true;
 }
 

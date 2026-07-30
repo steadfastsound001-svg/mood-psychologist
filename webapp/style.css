@@ -453,8 +453,9 @@ canvas { display: block; max-width: 100%; }
 .chat-messages::-webkit-scrollbar { width: 0; }
 
 /* плавный свайп между вкладками: слайд появляющейся вью в сторону жеста */
-@keyframes viewSlideRight { from { transform: translateX(36px); opacity: .35; } to { transform: none; opacity: 1; } }
-@keyframes viewSlideLeft  { from { transform: translateX(-36px); opacity: .35; } to { transform: none; opacity: 1; } }
+/* смаз: вью въезжает расфокусированной и наводится на резкость — как в свайпе пальцем */
+@keyframes viewSlideRight { from { transform: translateX(36px); opacity: .35; filter: blur(7px); } to { transform: none; opacity: 1; filter: blur(0); } }
+@keyframes viewSlideLeft  { from { transform: translateX(-36px); opacity: .35; filter: blur(7px); } to { transform: none; opacity: 1; filter: blur(0); } }
 .view-slide-right { animation: viewSlideRight .27s cubic-bezier(.22,.61,.36,1); }
 .view-slide-left  { animation: viewSlideLeft  .27s cubic-bezier(.22,.61,.36,1); }
 @media (prefers-reduced-motion: reduce) {
@@ -471,9 +472,9 @@ canvas { display: block; max-width: 100%; }
   background: var(--bg);
   margin: 0 !important;
   max-width: none !important;
-  will-change: transform;
+  will-change: transform, filter;
 }
-.swipe-layer.animate { transition: transform .26s cubic-bezier(.22,.61,.36,1); }
+.swipe-layer.animate { transition: transform .26s cubic-bezier(.22,.61,.36,1), filter .26s cubic-bezier(.22,.61,.36,1); }
 
 /* ───────── app-lock (Face ID / код) ───────── */
 .lock-screen {
