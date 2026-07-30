@@ -108,6 +108,17 @@ summary .t{font-size:14px;font-weight:500}
 summary .m{font-size:11px;color:var(--faint)}
 .edited{color:var(--accent)}
 
+/* спойлер целого раздела: заголовок как у карточки, содержимое свёрнуто */
+details.fold{border-bottom:0}
+details.fold > summary{padding:0}
+details.fold > summary .t{
+  font:600 12px Manrope,sans-serif; letter-spacing:1.3px; text-transform:uppercase; color:var(--faint);
+}
+details.fold[open] > summary{margin-bottom:8px}
+.fold-b{animation:foldIn .26s cubic-bezier(.32,.72,0,1)}
+@keyframes foldIn{from{opacity:0;transform:translateY(-5px);filter:blur(4px)}to{opacity:1;transform:none;filter:blur(0)}}
+.fold-b .sub{margin:0 0 6px}
+
 textarea,input,select{
   width:100%; padding:13px 15px; margin-top:4px;
   background:rgba(0,0,0,.28); color:var(--ink);
@@ -233,6 +244,7 @@ a{color:var(--accent);text-decoration:none}
 .mrow:last-child{border-bottom:0}
 .mrow .mk{flex:0 0 128px;font-size:13px;color:var(--dim)}
 .mrow select{flex:1;min-width:190px;margin:0}
+.mrow input[type=number]{flex:0 0 130px;margin:0;text-align:center}
 .mnote{font-size:11px;color:var(--faint);flex-basis:100%;padding-left:139px}
 @media(max-width:560px){.mnote{padding-left:0}}
 .switch{display:flex;gap:5px}
@@ -472,12 +484,14 @@ function renderPulse() {
 }
 
 /* ─── личность: правка того, чем психолог говорит ─── */
-const CAT = { prompt:"промпты", filter:"фильтры моделей", model:"модели", setting:"настройки", order:"порядок" };
+/* сырьё, у которого нет своей карточки выше. модели (cat model) и настройки (cat setting)
+   правятся карточками «модели» и «характер» — второй раз их не показываем. */
+const CAT = { prompt:"промпты", filter:"фильтры моделей", order:"порядок" };
 
 function mark(it) {
   const m = document.querySelector(`[data-mark="${it.key}"]`);
   if (!m) return;
-  m.textContent = it.overridden ? "изменён" : "из файла";
+  m.textContent = it.overridden ? "изменён" : "";   // «из файла» — состояние по умолчанию, метка только на правках
   m.className = "m" + (it.overridden ? " edited" : "");
 }
 function editor(it) {
@@ -652,6 +666,19 @@ function modelsCard() {
     sw.append(b);
   });
   host.append(e("div",{class:"mrow"}, e("span",{class:"mk",text:"второй проход"}), sw, msg));
+
+  // потолок длины — предохранитель, а не цель: короткость задаёт характер, а обрезка ломает мысль
+  const capIt = ITEMS.find(i => i.key === "chat_max_tokens");
+  if (capIt) {
+    const cap = e("input",{type:"number",min:"120",max:"4000",step:"20",
+                           value:String(capIt.value || capIt.default || 700)});
+    const cnote = e("div",{class:"mnote",text:"предохранитель, не цель. мало → ответ обрывается на полуслове"});
+    cap.oninput = () => {
+      capIt.value = cap.value; capIt.overridden = true;
+      stage("chat_max_tokens", cap.value, "потолок ответа");
+    };
+    host.append(e("div",{class:"mrow"}, e("span",{class:"mk",text:"потолок ответа"}), cap, cnote));
+  }
   return card("модели", e("div",{class:"sub",
     text:"черновик считает первая модель, финал клиенту пишет редактор. выключишь второй проход — почерк модели вылезет сразу."}), host);
 }
@@ -757,18 +784,33 @@ function renderSoul() {
   s.append(modelsCard());
   const layers = layersCard(); if (layers) s.append(layers);
   const dials = dialsCard(); if (dials) s.append(dials);
-  s.append(card(null, e("div",{class:"sub",
-    text:"ниже — сырые тексты. живут в файлах config/psychologist/ и подхватываются без перезапуска. правка здесь ложится поверх файла — «вернуть файл» её снимает."})));
-  for (const [cat, title] of Object.entries(CAT)) {
+  // сырые тексты — свёрнуты. модели и настройки сюда не идут: у них есть свои карточки
+  // выше, а два места для одного значения — способ потерять, где правда.
+  for (const cat of ["prompt", "filter"]) {
     const list = ITEMS.filter(i => i.cat === cat);
     if (!list.length) continue;
-    s.append(card(title, ...list.map(it => e("details", {},
+    const edited = list.filter(i => i.overridden).length;
+    s.append(card(null, e("details", {class:"fold"},
       e("summary", {},
-        e("span",{class:"t",text:it.label}),
-        e("span",{class:"m" + (it.overridden ? " edited" : ""), "data-mark":it.key,
-                  text: it.overridden ? "изменён" : "из файла"})),
-      editor(it)))));
+        e("span",{class:"t",text:CAT[cat]}),
+        e("span",{class:"m" + (edited ? " edited" : ""),
+                  text: edited ? `${edited} из ${list.length} правлено` : String(list.length)})),
+      e("div",{class:"fold-b"},
+        e("div",{class:"sub",text:"живут в config/psychologist/, подхватываются без перезапуска. правка ложится поверх файла — «вернуть файл» её снимает."}),
+        ...list.map(it => e("details", {},
+          e("summary", {},
+            e("span",{class:"t",text:it.label}),
+            e("span",{class:"m" + (it.overridden ? " edited" : ""), "data-mark":it.key,
+                      text: it.overridden ? "изменён" : ""})),
+          editor(it)))))));
   }
+  const ord = ITEMS.filter(i => i.cat === "order");
+  if (ord.length) s.append(card(CAT.order, ...ord.map(it => e("details", {},
+    e("summary", {},
+      e("span",{class:"t",text:it.label}),
+      e("span",{class:"m" + (it.overridden ? " edited" : ""), "data-mark":it.key,
+                text: it.overridden ? "изменён" : ""})),
+    editor(it)))));
 }
 
 /* ─── проба: плавающее окно, доступно с любого экрана ─── */
