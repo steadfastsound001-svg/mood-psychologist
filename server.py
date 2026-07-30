@@ -384,10 +384,16 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     break
         except Exception as e:
-            try:
-                self.wfile.write(f"\n[сломалось: {e}]".encode("utf-8"))
-            except Exception:
-                pass
+            # ни одной модели — отвечаем сами, в кризисе с телефонами. техническая
+            # строка в ответ на «не хочу жить» недопустима.
+            print(f"[стрим] uid={uid} {type(e).__name__}: {e}", flush=True)
+            tail = safety.last_resort(tier) if not acc else "\n\n[связь оборвалась]"
+            acc.append(tail)
+            if not hold:                      # в кризисе весь текст уйдёт ниже, разом
+                try:
+                    self.wfile.write(tail.encode("utf-8")); self.wfile.flush()
+                except Exception:
+                    pass
         raw = "".join(acc).strip()
         # телефоны: выдуманный меняем на настоящий, в кризисе номер обязан быть
         reply = safety.guarantee(safety.scrub_numbers(raw), tier)

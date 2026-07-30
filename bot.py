@@ -440,7 +440,10 @@ async def stream_reply(
         full = safety.guarantee(safety.scrub_numbers(full), tier)
         await push(full, final=True)
     except Exception as e:
-        await push(full + f"\n\n[обрыв стрима: {e}]" if full else f"сломалось: {e}")
+        # ни одной модели — отвечаем сами. в кризисе с телефонами: техническая
+        # строка в ответ на «не хочу жить» недопустима.
+        print(f"[стрим] {type(e).__name__}: {e}", flush=True)
+        await push(full + "\n\n[связь оборвалась]" if full else safety.last_resort(tier), final=True)
         return full or None
 
     final_html = htmlify(full)
@@ -859,7 +862,8 @@ class WebHandler(BaseHTTPRequestHandler):
                     final = safety.guarantee(safety.scrub_numbers(
                         trim_incomplete(humanize_text(draft, q, cap + 200)) or draft), tier)
                 except Exception as e:
-                    final = f"сломалось: {e}"
+                    # в пробе причину видеть надо — но ответ всё равно человеческий
+                    final = safety.last_resort(tier) + f"\n\n[проба: {e}]"
                 payload = final.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
