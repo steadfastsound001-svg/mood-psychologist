@@ -120,9 +120,11 @@ def _humanize_models():
     soul = agent_config.cfg("soul", "")
     frame = agent_config.cfg("humanizer_prompt")
     sys = (soul + "\n\n" + frame) if soul else frame   # «по тем же инструкциям» — душа внутри редактора
-    return (agent_config.cfg("humanize_on", "1") == "1",
-            agent_config.cfg("humanizer_model", "anthropic/claude-sonnet-4.6"),
-            sys)
+    # пустая должность = редактора нет. Так снимают второй проход, когда черновик
+    # пишет модель, которой правка уже не нужна (например Opus 5 одним вызовом).
+    model = (agent_config.cfg("humanizer_model", "") or "").strip()
+    on = agent_config.cfg("humanize_on", "1") == "1" and bool(model)
+    return (on, model, sys)
 
 
 def _editor_input(draft: str, user_msg: str | None) -> str:

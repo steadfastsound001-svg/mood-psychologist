@@ -173,6 +173,17 @@ a{color:var(--accent);text-decoration:none}
 .pt-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .tag{font-size:11px;padding:5px 10px;border-radius:11px;background:rgba(192,160,128,.14);
      border:1px solid rgba(192,160,128,.22);color:var(--ink)}
+.pt-bars{margin-top:14px;display:grid;gap:6px}
+.bar{display:flex;align-items:center;gap:9px}
+.bar .bk{flex:0 0 74px;font-size:11px;color:var(--dim)}
+.bar .bt{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.bar .bt i{display:block;height:100%;border-radius:3px;
+  background:linear-gradient(90deg,rgba(79,138,130,.85),rgba(192,160,128,.95));
+  transition:width .45s cubic-bezier(.32,.72,0,1)}
+.bar .bv{flex:0 0 24px;text-align:right;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.warns{margin-top:13px;display:grid;gap:6px}
+.warn{font-size:11.5px;line-height:1.45;color:#e0b09c;background:rgba(201,112,90,.12);
+  border:1px solid rgba(201,112,90,.25);border-radius:12px;padding:8px 11px}
 
 /* модели */
 .mrow{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);flex-wrap:wrap}
@@ -246,6 +257,8 @@ a{color:var(--accent);text-decoration:none}
   </div>
   <div class="probe-b" id="probeBody"></div>
 </div>
+
+<script src="/persona.js?v=1"></script>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -387,53 +400,79 @@ function chosenDials() {
     out[d.key] = Number.isInteger(c[d.key]) ? c[d.key] : (d.default ?? 2);
   return out;
 }
+const TRAIT_TITLES = { warmth:"тепло", edge:"острота", depth:"глубина", tempo:"темп",
+                       engagement:"вовлечён", steadiness:"опора", aliveness:"живость" };
+
+function refreshPortrait() {
+  const fresh = portraitCard();
+  const old = document.querySelector("#soul .card");
+  if (fresh && old && old.querySelector("h2")?.textContent === "портрет личности") old.replaceWith(fresh);
+}
+
+function personaNow() {
+  return window.Persona.compute({
+    dialsSpec: (DATA?.dials?.spec) || [],
+    dialsValue: chosenDials(),
+    order: ((DATA?.layers) || []).map(l => l.file),
+    models: DATA?.models || {},
+    known: DATA?.known_models || [],
+  });
+}
+
 function portraitCard() {
   const spec = (DATA?.dials?.spec) || [];
-  if (!spec.length) return null;
-  const ch = chosenDials();
-  const N = spec.length, R = 74, cx = 95, cy = 95;
+  if (!spec.length || !window.Persona) return null;
+  const P = personaNow();
+  const keys = Object.keys(P.traits);
+  const N = keys.length, R = 72, cx = 95, cy = 95;
   const pt = (i, r) => {
     const a = (Math.PI * 2 * i) / N - Math.PI / 2;
     return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
   };
-  const poly = (r) => spec.map((_, i) => pt(i, r).map(v => v.toFixed(1)).join(",")).join(" ");
+  const poly = (r) => keys.map((_, i) => pt(i, r).map(v => v.toFixed(1)).join(",")).join(" ");
 
   const svg = svgEl("svg", { viewBox: "0 0 190 190", "aria-label": "портрет личности" });
-  [1, .66, .33].forEach(k => svg.append(svgEl("polygon",
-    { points: poly(R * k), fill: "none", stroke: "rgba(255,255,255,.09)", "stroke-width": "1" })));
-  spec.forEach((_, i) => {
+  const grad = svgEl("radialGradient", { id: "pg", cx: "50%", cy: "50%" });
+  grad.append(svgEl("stop", { offset: "0%", "stop-color": "#c0a080", "stop-opacity": ".42" }),
+              svgEl("stop", { offset: "100%", "stop-color": "#4f8a82", "stop-opacity": ".22" }));
+  const defs = svgEl("defs"); defs.append(grad); svg.append(defs);
+  [1, .75, .5, .25].forEach(k => svg.append(svgEl("polygon",
+    { points: poly(R * k), fill: "none", stroke: "rgba(255,255,255,.08)", "stroke-width": "1" })));
+  keys.forEach((_, i) => {
     const [x, y] = pt(i, R);
     svg.append(svgEl("line", { x1: cx, y1: cy, x2: x.toFixed(1), y2: y.toFixed(1),
                                stroke: "rgba(255,255,255,.07)" }));
   });
-  const shape = spec.map((d, i) => pt(i, 16 + (ch[d.key] / 4) * (R - 16)).map(v => v.toFixed(1)).join(",")).join(" ");
-  svg.append(svgEl("polygon", { points: shape, fill: "rgba(192,160,128,.24)",
-    stroke: "#c0a080", "stroke-width": "1.7", "stroke-linejoin": "round" }));
-  spec.forEach((d, i) => {
-    const [x, y] = pt(i, 16 + (ch[d.key] / 4) * (R - 16));
-    svg.append(svgEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: "2.6", fill: "#c0a080" }));
-    const [lx, ly] = pt(i, R + 13);
-    svg.append(svgEl("text", { x: lx.toFixed(1), y: (ly + 3).toFixed(1), "font-size": "8.5",
-      fill: "#9d968a", "text-anchor": "middle", "font-family": "Manrope,sans-serif" }, d.title));
+  const shape = keys.map((k, i) => pt(i, 13 + P.traits[k] * (R - 13)).map(v => v.toFixed(1)).join(",")).join(" ");
+  svg.append(svgEl("polygon", { points: shape, fill: "url(#pg)", stroke: "#c0a080",
+    "stroke-width": "1.8", "stroke-linejoin": "round" }));
+  keys.forEach((k, i) => {
+    const [x, y] = pt(i, 13 + P.traits[k] * (R - 13));
+    svg.append(svgEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: "2.7", fill: "#c0a080" }));
+    const [lx, ly] = pt(i, R + 14);
+    svg.append(svgEl("text", { x: lx.toFixed(1), y: (ly + 3).toFixed(1), "font-size": "8",
+      fill: "#9d968a", "text-anchor": "middle", "font-family": "Manrope,sans-serif" }, TRAIT_TITLES[k] || k));
   });
 
-  // словесный слепок: самые отклонённые от базы черты и есть характер
-  const off = spec.map(d => ({ d, i: ch[d.key], dist: Math.abs(ch[d.key] - (d.default ?? 2)) }))
-                  .sort((a, b) => b.dist - a.dist);
-  const lead = off.filter(x => x.dist > 0).slice(0, 3)
-                  .map(x => (PT_WORDS[x.d.key] || [])[x.i] || (x.d.levels[x.i] || {}).label)
-                  .filter(Boolean);
-  const changed = off.filter(x => x.dist > 0).length;
-  const tags = spec.map(d => e("span", { class:"tag",
-    text: `${d.title}: ${(d.levels[ch[d.key]] || {}).label || "?"}` }));
-
   const box = e("div",{class:"portrait"});
-  box.append(svg, e("div",{class:"pt-word"},
-    e("div",{class:"pt-line",text: lead.length ? lead.join(", ") : "ровно по базовой личности"}),
-    e("div",{class:"pt-sub", text: changed
-      ? `${changed} из ${N} черт отклонены от базовых. крутится ниже — фигура меняется сразу.`
-      : "все черты на базовом уровне: чистый характер из слоёв личности."}),
-    e("div",{class:"pt-tags"}, ...tags)));
+  const words = e("div",{class:"pt-word"},
+    e("div",{class:"pt-line",text:P.essence}),
+    e("div",{class:"pt-sub",text:P.summary}));
+  const bars = e("div",{class:"pt-bars"});
+  keys.forEach(k => {
+    const v = Math.round(P.traits[k] * 100);
+    bars.append(e("div",{class:"bar"},
+      e("span",{class:"bk",text:TRAIT_TITLES[k] || k}),
+      e("span",{class:"bt"}, e("i",{style:`width:${v}%`})),
+      e("span",{class:"bv",text:String(v)})));
+  });
+  words.append(bars);
+  if (P.warn.length) {
+    const w = e("div",{class:"warns"});
+    P.warn.forEach(t => w.append(e("div",{class:"warn",text:"⚠ " + t})));
+    words.append(w);
+  }
+  box.append(svg, words);
   return card("портрет личности", box);
 }
 
@@ -444,22 +483,40 @@ function modelsCard() {
   for (const [key, label] of [["model_chat","черновик · чат"],
                               ["model_deep","портрет · итоги"],
                               ["humanizer_model","редактор-голос"]]) {
-    const cur = (DATA?.models || {})[key] || "";
+    // редактор при выключенном втором проходе показываем как вакансию
+    const off = key === "humanizer_model" && (DATA?.models || {}).humanize_on !== "1";
+    const cur = off ? "" : ((DATA?.models || {})[key] || "");
     const sel = e("select");
     const ids = known.map(m => m.id);
     if (cur && !ids.includes(cur)) ids.unshift(cur);
+    // пустая должность: для редактора это выключает второй проход целиком
+    if (key === "humanizer_model") ids.unshift("");
     ids.forEach(id => {
-      const o = e("option",{value:id,text:id});
+      const o = e("option",{value:id,text:id || "— не назначен —"});
       if (id === cur) o.setAttribute("selected","selected");
       sel.append(o);
     });
     const note = e("div",{class:"mnote",text:(known.find(m => m.id === cur) || {}).note || ""});
     sel.onchange = async () => {
-      try { await api("/api/admin/config", { key, value: sel.value });
-            DATA.models[key] = sel.value;
-            note.textContent = (known.find(m => m.id === sel.value) || {}).note || "";
-            flash(note, " применено ✓"); }
-      catch (err) { flash(note, " ошибка: " + err.message, true); }
+      try {
+        // «не назначен» для редактора = снять второй проход. Пустая строка в конфиге
+        // означает «сброс к файлу», поэтому вакансию выражаем тумблером humanize_on.
+        if (key === "humanizer_model" && !sel.value) {
+          await api("/api/admin/config", { key:"humanize_on", value:"0" });
+          DATA.models.humanize_on = "0";
+          note.textContent = "второй проход снят — финал пишет сама модель черновика";
+        } else {
+          await api("/api/admin/config", { key, value: sel.value });
+          DATA.models[key] = sel.value;
+          note.textContent = (known.find(m => m.id === sel.value) || {}).note || "";
+          if (key === "humanizer_model") {
+            await api("/api/admin/config", { key:"humanize_on", value:"1" });
+            DATA.models.humanize_on = "1";
+          }
+        }
+        renderSoul();                       // перерисовываем: изменился и портрет, и тумблер
+        flash(note, " применено ✓");
+      } catch (err) { flash(note, " ошибка: " + err.message, true); }
     };
     host.append(e("div",{class:"mrow"}, e("span",{class:"mk",text:label}), sel, note));
   }
@@ -471,7 +528,7 @@ function modelsCard() {
       try { await api("/api/admin/config", { key:"humanize_on", value:v });
             DATA.models.humanize_on = v;
             [...sw.children].forEach(x => x.setAttribute("aria-selected", String(x === b)));
-            flash(msg, " применено ✓"); }
+            refreshPortrait(); flash(msg, " применено ✓"); }
       catch (err) { flash(msg, " ошибка: " + err.message, true); }
     }});
     b.setAttribute("aria-selected", String((v === "1") === on));
@@ -518,7 +575,9 @@ function layersCard() {
         if (!dragged || dragged === file) return;
         order = order.filter(x => x !== dragged);
         order.splice(order.indexOf(file), 0, dragged);
-        paint(); save();
+        // порядок слоёв — один из входов формулы, портрет обязан отреагировать
+        DATA.layers = order.map(f => layers.find(x => x.file === f)).filter(Boolean);
+        paint(); save(); refreshPortrait();
       });
       host.append(row);
     });
@@ -560,9 +619,7 @@ function dialsCard() {
       onclick:() => {
         chosen[d.key] = i; paint(i); save(note);
         DATA.dials.value = JSON.stringify(chosen);
-        const fresh = portraitCard();                     // портрет пересобираем сразу
-        const old = document.querySelector("#soul .card");
-        if (fresh && old) old.replaceWith(fresh);
+        refreshPortrait();
       } })));
     paint(cur);
     host.append(e("div",{class:"dial"},
