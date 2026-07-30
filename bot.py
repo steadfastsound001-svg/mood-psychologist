@@ -1060,6 +1060,7 @@ class WebHandler(BaseHTTPRequestHandler):
                            "numbers": len(safety._known_numbers())},
                 "models": {k: agent_config.cfg(k) for k in
                            ("model_chat", "model_deep", "humanizer_model", "humanize_on")},
+                "dials": {"spec": psyconfig.dials(), "value": agent_config.cfg("dials", "")},
             })
             return
         if url.path == "/api/me":
@@ -1429,6 +1430,30 @@ async def cmd_insights(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("свежие инсайты:\n\n" + "\n".join(items) if items else "пусто")
 
 
+async def cmd_panel(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ссылка в центр управления с уже вложенным входом.
+
+    Telegram сам подтверждает, что это владелец, поэтому отдельный пароль не нужен:
+    кладём токен сессии в ссылку, панель прячет его в браузер и больше не спрашивает.
+    """
+    if update.effective_user.id != USER_ID:
+        return
+    base = detect_webapp_url()
+    if not base:
+        await update.message.reply_text("нет публичного адреса: не поднят туннель на 127.0.0.1:8765")
+        return
+    try:
+        token = store.create_session(owner_uid())
+    except Exception as e:
+        await update.message.reply_text(f"не создал сессию: {e}")
+        return
+    url = f"{base.rstrip('/')}/admin.html#token={token}"
+    await update.message.reply_text(
+        "центр управления. открой один раз — дальше входить не нужно:\n\n" + url,
+        disable_web_page_preview=True,
+    )
+
+
 async def cmd_dashboard(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != USER_ID:
         return
@@ -1467,6 +1492,7 @@ async def _register_bot_commands(app) -> None:
             BotCommand("skill", "техника"),
             BotCommand("insights", "инсайты"),
             BotCommand("morning", "утро"),
+            BotCommand("panel", "центр управления"),
             BotCommand("evening", "вечер"),
             BotCommand("week", "обзор недели"),
             BotCommand("month", "обзор месяца"),
@@ -1613,6 +1639,7 @@ def main() -> None:
     app.add_handler(CommandHandler("insights", cmd_insights))
     app.add_handler(CommandHandler("template", cmd_template))
     app.add_handler(CommandHandler("dashboard", cmd_dashboard))
+    app.add_handler(CommandHandler("panel", cmd_panel))
     app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CallbackQueryHandler(on_callback))

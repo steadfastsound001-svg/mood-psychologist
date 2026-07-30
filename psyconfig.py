@@ -80,6 +80,13 @@ def _build() -> tuple[dict, dict]:
 
     # номера отдаём и отдельным ключом: safety.guarantee сверяет по ним ответ модели
     vals["crisis_numbers"] = subst["crisis_numbers"]
+
+    # ручки характера: описание шкал отдаём панели, выбранные уровни — промпту.
+    # значения уровней живут в agent_config (их крутят из панели), поэтому
+    # сам текст собирается в dials_text() и подмешивается в system_base.
+    dials_rel = manifest.get("dials")
+    if dials_rel:
+        vals["dials_spec"] = _read(dials_rel)
     vals["layer_order"] = ",".join(manifest.get("layer_order") or ["soul", "system_base"])
     for k, v in (variables.get("models") or {}).items():
         if v:
@@ -113,6 +120,32 @@ def _ensure() -> dict:
 def get(key: str):
     """Значение ключа из файлов (свежее). None — ключа нет, решает вызывающий."""
     return _ensure().get(key)
+
+
+def dials() -> list[dict]:
+    """Описание ручек характера (для панели). Пустой список — ручек нет."""
+    try:
+        return json.loads(get("dials_spec") or "{}").get("dials", [])
+    except json.JSONDecodeError:
+        return []
+
+
+def dials_text(chosen: dict[str, int]) -> str:
+    """Выбранные уровни → блок инструкций. Уровень «ровно» ничего не добавляет,
+    чтобы не спорить с базовыми слоями."""
+    lines = []
+    for d in dials():
+        lvls = d.get("levels") or []
+        i = chosen.get(d["key"], d.get("default", 2))
+        if not isinstance(i, int) or not (0 <= i < len(lvls)):
+            continue
+        t = (lvls[i].get("text") or "").strip()
+        if t:
+            lines.append(f"— {t}")
+    if not lines:
+        return ""
+    return ("═ НАСТРОЙКА ХАРАКТЕРА — перекрывает общие правила голоса выше, "
+            "но НИКОГДА не отменяет безопасность, правду и кризис-протокол\n\n" + "\n".join(lines))
 
 
 def version() -> str:

@@ -43,5 +43,6 @@
   },
   "safety": {
     "markers": "safety/markers.json"
-  }
+  },
+  "dials": "dials.json"
 }

@@ -25,10 +25,27 @@ agent_config.register("layer_order", "soul,system_base",
                       "Порядок слоёв в промпте чата",
                       "Через запятую. Перетасуй — меняешь хронологию подачи. Доступно: soul, system_base. Фильтр модели всегда идёт первым.",
                       "order", 0)
+agent_config.register("dials", "", "Ручки характера",
+                      "JSON вида {\"warmth\": 3}: выбранные уровни шкал из config/psychologist/dials.json. "
+                      "Крутится из центра управления, подмешивается отдельным слоем после базовых.", "setting", 2)
 agent_config.register("chat_max_tokens", "700", "Потолок длины ответа (токены)",
                       "ПОТОЛОК-предохранитель, не цель. Короткость задаёт характер (1-2 строки), "
                       "а не обрезка. Слишком мало → ответ обрывается на полуслове; у reasoning-моделей "
                       "(deepseek-v4-pro) часть бюджета съедает размышление. 700 = с запасом.", "setting", 0)
+
+
+def _dials_block() -> str:
+    """Выбранные в панели уровни ручек → текст. Значения лежат в agent_config
+    (ключ dials, JSON вида {"warmth": 3, ...}), поэтому меняются на лету."""
+    import json
+    try:
+        chosen = json.loads(cfg("dials", "") or "{}")
+    except Exception:
+        chosen = {}
+    try:
+        return psyconfig.dials_text(chosen if isinstance(chosen, dict) else {})
+    except Exception:
+        return ""
 
 
 def user_system(compiled_profile: str, insights: str = "") -> list:
@@ -46,6 +63,11 @@ def user_system(compiled_profile: str, insights: str = "") -> list:
     for name in ("soul", "system_base"):   # на случай если в order чего-то нет
         if name not in used and parts.get(name):
             blocks.append({"type": "text", "text": parts[name]}); used.add(name)
+    # ручки характера идут ПОСЛЕ базовых слоёв: они их подстраивают, а не спорят.
+    # ставим отдельным блоком — так видно в логах, чем именно личность отличается от базовой.
+    tuned = _dials_block()
+    if tuned:
+        blocks.append({"type": "text", "text": tuned})
     cp = (compiled_profile or "").strip()
     if cp:
         blocks.append({

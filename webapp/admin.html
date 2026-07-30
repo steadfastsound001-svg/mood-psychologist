@@ -141,6 +141,26 @@ button.b.ghost{background:transparent;color:var(--dim)}
 .ask{display:flex;gap:9px;margin-top:13px}
 .ask input{margin:0;font-family:Manrope,sans-serif;font-size:14px}
 
+/* ручки характера */
+.dial{padding:14px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.dial:last-of-type{border-bottom:0}
+.dial-h{display:flex;align-items:baseline;gap:9px;margin-bottom:10px;flex-wrap:wrap}
+.dial-t{font-size:14px;font-weight:600}
+.dial-hint{font-size:11px;color:var(--faint)}
+.scale{display:flex;gap:5px}
+.seg{
+  flex:1;height:30px;border:1px solid var(--stroke);border-radius:11px;cursor:pointer;
+  background:rgba(255,255,255,.03);
+  transition:background .3s cubic-bezier(.32,.72,0,1),transform .18s,border-color .25s;
+}
+.seg:hover{background:rgba(255,255,255,.08)}
+.seg:active{transform:scale(.94)}
+.seg[aria-selected="true"]{
+  background:linear-gradient(180deg,rgba(192,160,128,.9),rgba(166,124,82,.85));
+  border-color:transparent; box-shadow:0 3px 12px rgba(192,160,128,.24);
+}
+.dial-note{font-size:11px;color:var(--dim);margin-top:7px;min-height:14px}
+
 .empty{color:var(--faint);font-size:13px;padding:14px 2px}
 a{color:var(--accent);text-decoration:none}
 </style>
@@ -165,6 +185,15 @@ a{color:var(--accent);text-decoration:none}
 
 <script>
 const $ = (id) => document.getElementById(id);
+
+/* Вход один раз: бот присылает ссылку с #token=… (в Telegram владелец уже подтверждён).
+   Забираем токен, прячем в браузер и вычищаем из адреса, чтобы не светился в истории. */
+(() => {
+  const m = location.hash.match(/token=([^&]+)/);
+  if (!m) return;
+  try { localStorage.setItem("mood_token", decodeURIComponent(m[1])); } catch (_) {}
+  history.replaceState(null, "", location.pathname);
+})();
 const token = localStorage.getItem("mood_token") || "";
 const H = { "Authorization": "Bearer " + token, "Content-Type": "application/json" };
 
@@ -269,8 +298,50 @@ function editor(it) {
   acts.append(save, reset);
   return e("div", {}, ta, acts);
 }
+/* ручки характера: смысловые шкалы вместо правки сырого текста */
+function dialsCard() {
+  const spec = (DATA?.dials?.spec) || [];
+  if (!spec.length) return null;
+  let chosen = {};
+  try { chosen = JSON.parse(DATA.dials.value || "{}") || {}; } catch (_) {}
+
+  const host = e("div");
+  const save = async (msgHost) => {
+    try { await api("/api/admin/config", { key:"dials", value: JSON.stringify(chosen) });
+          DATA.dials.value = JSON.stringify(chosen); flash(msgHost, "применено ✓"); }
+    catch (err) { flash(msgHost, "ошибка: " + err.message, true); }
+  };
+
+  for (const d of spec) {
+    const cur = Number.isInteger(chosen[d.key]) ? chosen[d.key] : (d.default ?? 2);
+    const scale = e("div",{class:"scale"});
+    const note = e("div",{class:"dial-note"});
+    const paint = (i) => {
+      [...scale.children].forEach((b, k) => b.setAttribute("aria-selected", String(k === i)));
+      note.textContent = (d.levels[i]?.label || "") + (i === (d.default ?? 2) ? " · базовый" : "");
+    };
+    d.levels.forEach((lv, i) => scale.append(e("button",{ class:"seg", title:lv.label,
+      onclick:() => { chosen[d.key] = i; paint(i); save(note); } })));
+    paint(cur);
+    host.append(e("div",{class:"dial"},
+      e("div",{class:"dial-h"},
+        e("span",{class:"dial-t",text:d.title}),
+        e("span",{class:"dial-hint",text:d.hint || ""})),
+      scale, note));
+  }
+  const acts = e("div",{class:"acts"},
+    e("button",{class:"b ghost",text:"вернуть базовые",onclick:async(ev)=>{
+      chosen = {}; await save(ev.target.parentNode); renderSoul();
+    }}));
+  host.append(acts);
+  return card("характер", e("div",{class:"sub",
+    text:"крутится на лету и ложится поверх базовых слоёв. безопасность, правду и кризис-протокол не отменяет."}), host);
+}
+
 function renderSoul() {
   const s = $("soul"); s.replaceChildren();
+  const dials = dialsCard();
+  if (dials) s.append(dials);
   s.append(card(null, e("div",{class:"sub",
     text:"тексты живут в файлах config/psychologist/ и подхватываются без перезапуска. правка здесь ложится поверх файла — «вернуть файл» её снимает."})));
   for (const [cat, title] of Object.entries(CAT)) {
