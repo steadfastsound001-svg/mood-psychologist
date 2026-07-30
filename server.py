@@ -703,10 +703,13 @@ class Handler(BaseHTTPRequestHandler):
                 key = (body.get("key") or "").strip()
                 if not key:
                     self._json(400, {"error": "no key"}); return
-                if body.get("reset"):
-                    agent_config.reset_item(key)
-                else:
-                    agent_config.set_item(key, body.get("value") or "")
+                try:
+                    if body.get("reset"):
+                        agent_config.reset_item(key)
+                    else:
+                        agent_config.set_item(key, body.get("value") or "")
+                except ValueError as err:       # производный ключ — не сохраняем
+                    self._json(400, {"error": str(err)}); return
                 self._json(200, {"ok": True, "items": agent_config.all_items()}); return
 
             if u.path == "/api/admin/test-chat":

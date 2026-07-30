@@ -19,7 +19,12 @@ ANTI_AI = psyconfig.get("anti_ai") or ""
 
 # ───────────── регистрация редактируемых промптов (админка может менять) ─────────────
 agent_config.register("soul", SOUL, "Душа — кто он", "Голос и характер высшего приоритета (config/psychologist/soul.md).", "prompt", 1)
-agent_config.register("system_base", SYSTEM_BASE, "Характер, методы, правила", "Главный системный промпт: склейка config/psychologist/system/*.md — инструментарий, голос, длина, запреты.", "prompt", 2)
+agent_config.register("system_base", SYSTEM_BASE, "Характер, методы, правила",
+                      "Склейка config/psychologist/system/*.md в порядке из манифеста. "
+                      "Только чтение: правится в самих слоях, порядок — перетаскиванием. "
+                      "Сохранённая копия заморозила бы сборку — после неё ни новый порядок, "
+                      "ни правка файлов уже не доезжают до модели.",
+                      "prompt", 2, derived=True)
 agent_config.register("anti_ai", ANTI_AI, "Анти-ИИ фильтр", "Подмешивается в портрет, итоги, настрой (config/psychologist/prompts/anti_ai.md).", "prompt", 3)
 agent_config.register("layer_order", "soul,system_base",
                       "Порядок слоёв в промпте чата",

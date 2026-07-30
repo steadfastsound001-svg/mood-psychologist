@@ -40,8 +40,12 @@ def _call_ov():
     return getattr(_TLS, "ov", None)
 
 
-def register(key, default, label="", desc="", cat="prompt", order=0):
-    _REG[key] = {"default": default, "label": label or key, "desc": desc, "cat": cat, "order": order}
+def register(key, default, label="", desc="", cat="prompt", order=0, derived=False):
+    """derived=True — значение СОБИРАЕТСЯ из других источников (напр. system_base — это
+    склейка слоёв). Такой ключ можно читать, но не переопределять: сохранённая копия
+    замораживает сборку, и после неё ни порядок слоёв, ни правка файлов уже не доезжают."""
+    _REG[key] = {"default": default, "label": label or key, "desc": desc,
+                 "cat": cat, "order": order, "derived": bool(derived)}
 
 
 def _overrides() -> dict:
@@ -80,7 +84,15 @@ def cfg_int(key, default):
         return default
 
 
+def is_derived(key) -> bool:
+    return bool(_REG.get(key, {}).get("derived"))
+
+
 def set_item(key, value):
+    # производный ключ переопределять нельзя — см. register(). Пустая строка = сброс,
+    # её пропускаем: она как раз лечит уже существующую замороженную копию.
+    if value and is_derived(key):
+        raise ValueError(f"{key} собирается из других ключей — его нельзя переопределить")
     store.set_config(key, value or "")
     global _cache_at
     _cache_at = 0.0       # сброс кэша → следующий cfg() перечитает
@@ -101,6 +113,6 @@ def all_items() -> list[dict]:
         items.append({
             "key": k, "label": m["label"], "desc": m["desc"], "cat": m["cat"],
             "value": ov.get(k) or "", "default": base,
-            "overridden": bool(ov.get(k)),
+            "overridden": bool(ov.get(k)), "derived": bool(m.get("derived")),
         })
     return items

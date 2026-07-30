@@ -40,7 +40,7 @@ import psyconfig
 import safety
 import agent_config
 from agent_core import htmlify, html_to_plain
-import agent_core  # noqa: F401 — регистрирует промпты (душа/редактор) в agent_config
+import agent_core  # регистрирует промпты (душа/редактор) и собирает системный промпт
 from retriever import retrieve_context  # BM25 RAG по дневнику
 import store  # multi-tenant SQLite (веб/PWA)
 import onboarding  # онбординг-тест + компиляция профиля
@@ -146,10 +146,36 @@ MOOD_PATH = DATA_DIR / "mood.jsonl"
 # Whisper-модель загружается лениво.
 _whisper_model = None
 
-DIALOG_HISTORY: dict[int, list[dict]] = {}
 DIALOG_LIMIT = 30
 
-SYSTEM_BASE = psyconfig.get("system_base") or ""   # текст: config/psychologist/system/*.md
+
+def dialog_history(limit: int = DIALOG_LIMIT) -> list[dict]:
+    """История диалога из общей БД — той же, что читает приложение.
+
+    Раньше она жила в словаре процесса: умирала при каждом перезапуске и не видела
+    ничего, написанного в приложении. Психолог терял ровно ту память, ради которой
+    он и нужен, — «в прошлый раз ты говорил» переставало работать посреди дня.
+    """
+    try:
+        rows = store.recent_messages(owner_uid(), limit)
+    except Exception as e:
+        print(f"[память] не прочитал историю: {e}", flush=True)
+        return []
+    return [{"role": "user" if r["role"] == "user" else "assistant",
+             "content": r["content"]} for r in rows if (r.get("content") or "").strip()]
+
+
+def remember(user_text: str, reply: str) -> None:
+    """Записать ход в общую БД: TG и приложение читают одну историю."""
+    if not (user_text or "").strip():
+        return
+    try:
+        uid = owner_uid()
+        store.add_message(uid, "user", user_text)
+        if (reply or "").strip():
+            store.add_message(uid, "assistant", reply)
+    except Exception as e:
+        print(f"[память] не записал ход: {e}", flush=True)
 
 
 # ───────────── helpers ─────────────
@@ -159,21 +185,11 @@ def read_learned() -> str:
 
 
 def cached_system() -> list[dict]:
-    blocks = [
-        {"type": "text", "text": SYSTEM_BASE},
-        {
-            "type": "text",
-            "text": f"<глубокий_профиль_Вани>\n{MASTER_PROFILE}\n</глубокий_профиль_Вани>",
-            "cache_control": {"type": "ephemeral"},
-        },
-    ]
-    learned = read_learned().strip()
-    if learned:
-        blocks.append({
-            "type": "text",
-            "text": f"<наблюдения_из_живых_диалогов>\n{learned}\n</наблюдения_из_живых_диалогов>",
-        })
-    return blocks
+    """Тот же промпт, что у приложения: душа → слои в порядке из манифеста → ручки
+    характера → профиль → наблюдения. Раньше бот собирал свой, из одного system_base,
+    прочитанного при импорте: в Telegram не доезжали ни душа, ни ручки, ни правки
+    файлов до перезапуска — психолог там был другим человеком."""
+    return agent_core.user_system(MASTER_PROFILE, read_learned())
 
 
 def read_recent_log(limit: int = 15) -> list[dict]:
@@ -286,7 +302,7 @@ STREAM_EDIT_MIN_CHARS = 20   # или минимум новых символов
 
 def _prepare_messages(user_text: str, mode: str, user_id: int) -> tuple[list[dict], str]:
     """Готовит messages с RAG-обвеской: модель видит хронологию + тематически релевантные записи."""
-    history = DIALOG_HISTORY.setdefault(user_id, [])
+    history = dialog_history()
 
     if mode == "entry":
         user_msg = user_text
@@ -336,8 +352,13 @@ async def stream_reply(
     mode: str = "entry",
     max_tokens: int = 460,
     task: str = "dialog",
+    remember_as: str | None = None,
 ) -> str | None:
-    """Стримит ответ модели в Telegram, обновляя одно сообщение. Возвращает финальный текст."""
+    """Стримит ответ модели в Telegram, обновляя одно сообщение. Возвращает финальный текст.
+
+    remember_as — что положить в историю вместо user_text. Нужен, когда модели уходит
+    служебно размеченный текст (кризис-флаг): в переписке должна остаться живая реплика.
+    """
     user_id = update.effective_user.id
     messages, user_msg = _prepare_messages(user_text, mode, user_id)
     # риск считаем в коде: у бота потолок вдвое ниже, и кризисный протокол
@@ -426,12 +447,10 @@ async def stream_reply(
         return None
     final_plain = html_to_plain(final_html)
 
-    # обновляем dialog history (plain — модель не должна тащить теги в свои следующие ответы)
-    hist = DIALOG_HISTORY.setdefault(user_id, [])
-    hist.append({"role": "user", "content": user_msg})
-    hist.append({"role": "assistant", "content": final_plain})
-    if len(hist) > DIALOG_LIMIT:
-        DIALOG_HISTORY[user_id] = hist[-DIALOG_LIMIT:]
+    # живой диалог пишем в общую историю (plain — модель не должна тащить теги в свои
+    # следующие ответы). разборы недели/месяца/целей — отчёты, в переписку не идут.
+    if mode in ("entry", "ask"):
+        remember(remember_as or user_msg, final_plain)
 
     return final_plain
 
@@ -820,7 +839,11 @@ class WebHandler(BaseHTTPRequestHandler):
                     if not key:
                         self._send_json(400, {"error": "no key"})
                         return
-                    agent_config.set_item(key, body.get("value") or "")
+                    try:
+                        agent_config.set_item(key, body.get("value") or "")
+                    except ValueError as err:   # производный ключ — не сохраняем
+                        self._send_json(400, {"error": str(err)})
+                        return
                     self._send_json(200, {"ok": True})
                     return
                 # проба: тот же промпт и модели, но без записи в историю клиента
@@ -865,7 +888,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 resp = client.messages.create(
                     system=user_system(prof.get("compiled", "")),
                     messages=messages,
-                    max_tokens=320,
+                    max_tokens=agent_config.cfg_int("chat_max_tokens", 700),
                     task="dialog",
                 )
                 reply = trim_incomplete(resp.content[0].text)
@@ -910,7 +933,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 async for delta in stream_completion(
                     system=cached_system(),
                     messages=messages,
-                    max_tokens=320,
+                    max_tokens=agent_config.cfg_int("chat_max_tokens", 700),
                     task="dialog",
                 ):
                     full += delta
@@ -928,12 +951,7 @@ class WebHandler(BaseHTTPRequestHandler):
             finally:
                 loop.close()
 
-        # обновляем dialog history (общая с TG)
-        hist = DIALOG_HISTORY.setdefault(USER_ID, [])
-        hist.append({"role": "user", "content": user_msg})
-        hist.append({"role": "assistant", "content": full})
-        if len(hist) > DIALOG_LIMIT:
-            DIALOG_HISTORY[USER_ID] = hist[-DIALOG_LIMIT:]
+        remember(user_msg, full)          # одна история на TG, приложение и этот эндпоинт
 
         # сохраняем в общий лог (HERO/NOW будут это учитывать)
         try:
@@ -1000,15 +1018,11 @@ class WebHandler(BaseHTTPRequestHandler):
                 resp = client.messages.create(
                     system=cached_system(),
                     messages=messages,
-                    max_tokens=320,
+                    max_tokens=agent_config.cfg_int("chat_max_tokens", 700),
                     task="dialog",
                 )
                 reply = trim_incomplete(resp.content[0].text)
-                hist = DIALOG_HISTORY.setdefault(USER_ID, [])
-                hist.append({"role": "user", "content": user_msg})
-                hist.append({"role": "assistant", "content": reply})
-                if len(hist) > DIALOG_LIMIT:
-                    DIALOG_HISTORY[USER_ID] = hist[-DIALOG_LIMIT:]
+                remember(user_msg, reply)
                 try:
                     write_jsonl(text, reply, kind="pwa")
                 except Exception:
@@ -1019,8 +1033,7 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/chat/history":
             try:
-                hist = DIALOG_HISTORY.get(USER_ID, [])
-                self._send_json(200, {"items": hist[-30:]})
+                self._send_json(200, {"items": dialog_history()})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
@@ -1101,21 +1114,8 @@ class WebHandler(BaseHTTPRequestHandler):
 
 
 def user_system(compiled_profile: str) -> list[dict]:
-    """Универсальное ядро (SYSTEM_BASE) + персональный профиль клиента."""
-    blocks = [{"type": "text", "text": SYSTEM_BASE}]
-    cp = (compiled_profile or "").strip()
-    if cp:
-        blocks.append({
-            "type": "text",
-            "text": f"<профиль_клиента>\n{cp}\n</профиль_клиента>",
-            "cache_control": {"type": "ephemeral"},
-        })
-    else:
-        blocks.append({
-            "type": "text",
-            "text": "<профиль_клиента>клиент ещё не прошёл онбординг. узнавай его в диалоге, мягко.</профиль_клиента>",
-        })
-    return blocks
+    """Промпт для клиента веб-эндпоинтов бота — та же сборка, что у приложения."""
+    return agent_core.user_system(compiled_profile)
 
 
 def start_web_server() -> None:
@@ -1183,17 +1183,16 @@ async def _process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
 
         # Редактируем отчёт параллельно стриму
         edited_task = loop.run_in_executor(None, edit_entry, text) if is_report else None
-        reply = await stream_reply(update, context, prompt_text, mode="entry", max_tokens=320, task="dialog")
+        reply = await stream_reply(update, context, prompt_text, mode="entry",
+                                   max_tokens=agent_config.cfg_int("chat_max_tokens", 700),
+                                   task="dialog", remember_as=text)
         edited = await edited_task if edited_task else text
 
         write_jsonl(text, reply or "", kind=kind)
-        # синхронизация с веб/PWA: пишем диалог в общий store (Turso) под аккаунт владельца,
-        # чтобы то, что написано в TG, появлялось в приложении. не валит ответ при сбое БД.
+        # диалог в общую историю уже записал stream_reply. здесь остаётся дневник:
+        # длинная запись появляется во вкладке «дневник» приложения.
         try:
             uid = owner_uid()
-            store.add_message(uid, "user", text)
-            if reply:
-                store.add_message(uid, "assistant", reply)
             if is_report:
                 # длинная запись = дневник: появляется во вкладке «дневник» приложения
                 d = store.add_diary_entry(uid, edited or text, raw=text)

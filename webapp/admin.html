@@ -127,6 +127,8 @@ textarea,input,select{
   transition:border-color .2s, background .2s;
 }
 textarea:focus,input:focus,select:focus{outline:0;border-color:rgba(192,160,128,.5);background:rgba(0,0,0,.4)}
+textarea[readonly]{color:var(--dim);border-style:dashed;cursor:default}
+textarea[readonly]:focus{border-color:var(--stroke);background:rgba(0,0,0,.28)}
 select{font-family:Manrope,sans-serif;font-size:13px;cursor:pointer}
 select option{background:#171310}
 
@@ -498,6 +500,13 @@ function editor(it) {
   const text = it.value || it.default || "";
   const ta = e("textarea",{rows:String(Math.min(18, Math.max(4, text.split("\n").length + 1)))});
   ta.value = text;
+  // производный ключ (склейка слоёв) — только чтение: сохранённая копия заморозила бы
+  // сборку, и после неё ни новый порядок слоёв, ни правка файлов не доехали бы до модели
+  if (it.derived) {
+    ta.readOnly = true;
+    return e("div", {}, ta, e("div",{class:"acts"},
+      e("span",{class:"mnote",text:it.desc || "собирается из слоёв — правится в них, порядок перетаскиванием выше"})));
+  }
   const acts = e("div",{class:"acts"});
   ta.addEventListener("input", () => {
     it.value = ta.value; it.overridden = true; mark(it);
