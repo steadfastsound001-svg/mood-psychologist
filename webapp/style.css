@@ -210,8 +210,6 @@ html, body {
   margin-left: auto;
   margin-right: auto;
 }
-.breakdown-row .k { color: var(--hint); }
-.breakdown-row .v { color: var(--text); font-weight: 500; }
 
 /* ───────── cards ───────── */
 .card {
@@ -240,10 +238,6 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 1.5px;
 }
-.card.emphasis {
-  background: var(--surface-strong);
-}
-.row-grid > .card { margin-bottom: 0; }
 @media (min-width: 600px) { }
 
 /* lists with Apple-style dividers */
@@ -320,9 +314,6 @@ canvas { display: block; max-width: 100%; }
   font-size: var(--t-footnote);
   white-space: pre-wrap;
 }
-
-/* loading states */
-.loading .ring-fill { opacity: 0.3; animation: pulse 1.4s ease-in-out infinite; }
 .loading .summary { opacity: 0.5; }
 @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.6; } }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -405,7 +396,6 @@ canvas { display: block; max-width: 100%; }
   color: transparent;
   -webkit-text-fill-color: transparent;
 }
-.tab-center.active::before { opacity: 1; }
 
 /* добавим нижний отступ контенту чтобы tab-bar не перекрывал */
 .wrap {
@@ -452,29 +442,37 @@ canvas { display: block; max-width: 100%; }
 }
 .chat-messages::-webkit-scrollbar { width: 0; }
 
-/* плавный свайп между вкладками: слайд появляющейся вью в сторону жеста */
-/* смаз: вью въезжает расфокусированной и наводится на резкость — как в свайпе пальцем */
-@keyframes viewSlideRight { from { transform: translateX(36px); opacity: .35; filter: blur(7px); } to { transform: none; opacity: 1; filter: blur(0); } }
-@keyframes viewSlideLeft  { from { transform: translateX(-36px); opacity: .35; filter: blur(7px); } to { transform: none; opacity: 1; filter: blur(0); } }
-.view-slide-right { animation: viewSlideRight .27s cubic-bezier(.22,.61,.36,1); }
-.view-slide-left  { animation: viewSlideLeft  .27s cubic-bezier(.22,.61,.36,1); }
-@media (prefers-reduced-motion: reduce) {
-  .view-slide-right, .view-slide-left { animation: none; }
-}
+/* ───────── свайп между вкладками ─────────
+ *
+ * Соседнюю вкладку во время жеста НЕ показываем. Раньше два слоя ехали
+ * встык на всю ширину экрана: жёсткая кромка, пролетающая мимо, читается
+ * как подмена кадра — отсюда и «резковато». Вместо этого экран слегка
+ * поддаётся пальцу, а на отпускании уходит со смазом и приходит со смазом.
+ *
+ * Размытие — единственное исключение из правила «анимируем только transform
+ * и opacity»: без него уход выглядит рывком, а не движением. Живёт 170 мс на
+ * уходе и 240 мс на приходе, дальше слой снимается.
+ */
+.swipe-host { touch-action: pan-y; }
+/* will-change только на время жеста: постоянный слой создаёт содержащий блок
+   для fixed-потомков и ломает поведение всплывашек */
+.swipe-dragging { will-change: transform; }
+.swipe-settle { transition: transform .28s cubic-bezier(.22,.61,.36,1); }
 
-/* палец-фолоу свайп: слой вью на время жеста (вне свайпа классы нет) */
-.swipe-layer {
-  position: fixed !important;
-  top: 0; left: 0; right: 0;
-  bottom: calc(72px + env(safe-area-inset-bottom));
-  overflow: hidden !important;
-  z-index: 55;
-  background: var(--bg);
-  margin: 0 !important;
-  max-width: none !important;
-  will-change: transform, filter;
+@keyframes swipeOutLeft  { to   { transform: translate3d(-24%,0,0); filter: blur(9px); opacity: 0; } }
+@keyframes swipeOutRight { to   { transform: translate3d(24%,0,0);  filter: blur(9px); opacity: 0; } }
+@keyframes swipeInLeft   { from { transform: translate3d(26%,0,0);  filter: blur(9px); opacity: 0; } }
+@keyframes swipeInRight  { from { transform: translate3d(-26%,0,0); filter: blur(9px); opacity: 0; } }
+
+.swipe-out-left  { animation: swipeOutLeft  .17s cubic-bezier(.4,0,1,1) forwards; }
+.swipe-out-right { animation: swipeOutRight .17s cubic-bezier(.4,0,1,1) forwards; }
+.swipe-in-left   { animation: swipeInLeft   .24s cubic-bezier(0,0,.2,1); }
+.swipe-in-right  { animation: swipeInRight  .24s cubic-bezier(0,0,.2,1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe-out-left, .swipe-out-right, .swipe-in-left, .swipe-in-right { animation: none; }
+  .swipe-settle { transition: none; }
 }
-.swipe-layer.animate { transition: transform .26s cubic-bezier(.22,.61,.36,1), filter .26s cubic-bezier(.22,.61,.36,1); }
 
 /* ───────── app-lock (Face ID / код) ───────── */
 .lock-screen {
@@ -622,14 +620,6 @@ canvas { display: block; max-width: 100%; }
 .msg-fb-btn.on { opacity: 1; color: var(--accent); background: var(--surface-strong); }
 .msg-fb-btn.on .ico { fill: rgba(var(--accent-rgb), 0.18); }
 @media (hover: hover) { .msg-fb-btn:hover { opacity: 1; color: var(--text); } }
-.chat-mic.busy { opacity: 0.6; cursor: default; }
-.chat-mic.rec {
-  background: var(--destructive);
-  border-color: var(--destructive);
-  color: white;
-  box-shadow: 0 0 0 0 rgba(var(--destructive-rgb),0.6);
-  animation: micPulse 1.3s ease-out infinite;
-}
 @keyframes micPulse {
   0% { box-shadow: 0 0 0 0 rgba(var(--destructive-rgb),0.55); }
   70% { box-shadow: 0 0 0 14px rgba(var(--destructive-rgb),0); }
@@ -882,7 +872,6 @@ body.has-cursor .cursor-dot, body.has-cursor .cursor-ring {
   opacity: 0.45; transition: all 0.25s; text-align: center;
 }
 .ach.got { opacity: 1; background: var(--grad-spectrum-soft); border-color: rgba(var(--accent-rgb),0.3); box-shadow: 0 8px 20px rgba(var(--accent-rgb),0.12); }
-.ach.got .ach-lbl { color: var(--text); }
 
 /* ── аналитика ── */
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -1009,9 +998,6 @@ a:focus:not(:focus-visible),
 .pulse-e { font-family: var(--font-display); font-weight: 600; filter: none; color: var(--hint); transition: color 0.18s; }
 .pulse-btn.sel .pulse-e { color: var(--accent); }
 [data-theme="diary"] .pulse-btn.sel { border-color: rgba(176,130,90,0.5); }
-.theme-opt.sel { border-color: var(--accent); background: var(--grad-spectrum-soft); }
-.theme-swatch.night { background: linear-gradient(135deg, #0e0f12 0%, #5e5ce6 100%); }
-.theme-swatch.diary { background: linear-gradient(135deg, #efe7d6 0%, #b0825a 100%); }
 
 /* ───────── вкладка «дневник» ───────── */
 .diary-view { padding-bottom: 100px; }
@@ -1032,12 +1018,7 @@ a:focus:not(:focus-visible),
 .diary-entry:has(textarea) { -webkit-user-select: text; user-select: text; }
 .diary-date { font-size: var(--t-caption); color: var(--hint); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
 .diary-text { font-size: var(--t-body); line-height: 1.62; color: var(--text); white-space: pre-wrap; }
-.diary-entry:hover .diary-del { opacity: 1; }
 .diary-empty { color: var(--hint); text-align: center; padding: 40px 20px; font-size: var(--t-body); }
-.chat-diary.on { color: var(--accent); border-color: var(--accent); }
-
-/* режим записи дневника в чате */
-.chat-input-bar.diary-mode { background: var(--grad-spectrum-soft); }
 .diary-hint {
   text-align: center; font-size: var(--t-footnote); color: var(--hint);
   padding: 8px 12px 0;
@@ -1154,7 +1135,6 @@ a:focus:not(:focus-visible),
 .locked-ico .ico { width: 30px; height: 30px; opacity: 0.85; }
 .file-name .ico { width: 16px; height: 16px; color: var(--hint); vertical-align: -3px; margin-right: 4px; }
 .file-del .ico { width: 15px; height: 15px; }
-.diary-del .ico { width: 15px; height: 15px; }
 .stat-flame .ico { width: 17px; height: 17px; color: var(--ring-bad); vertical-align: -3px; }
 
 /* ── дневник: заголовок секции, видимая кнопка удаления ── */
@@ -1353,11 +1333,10 @@ a:focus:not(:focus-visible),
    через animation на :active — не клобберит существующие transition.
    .refresh исключён (у него свой spin-on-tap). */
 @keyframes pressPop { 35% { transform: scale(0.92); } 100% { transform: scale(1); } }
-button:active:not(.refresh):not(:disabled),
-.test-item:active, .scale-btn:active, .theme-opt:active, .lock-key:active,
-.diary-entry:active, .file-row:active, .tc-check:active {
+button:active:not(.refresh):not(:disabled), .test-item:active, .scale-btn:active, .lock-key:active, .diary-entry:active, .file-row:active {
   animation: pressPop 0.16s ease;
 }
+
 @media (prefers-reduced-motion: reduce) {
   button:active, .test-item:active, .scale-btn:active { animation: none; }
 }

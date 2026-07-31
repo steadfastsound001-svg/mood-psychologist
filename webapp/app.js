@@ -16,11 +16,6 @@ const haptic = (k = "light") => {
   try { tg?.HapticFeedback?.impactOccurred(k); } catch (_) {}
   try { if (_canVibrate()) navigator.vibrate(k === "heavy" ? 16 : k === "medium" ? 11 : 6); } catch (_) {}
 };
-const hapticSel = () => {
-  if (_nativeHaptic("hapticSel", "")) return;
-  try { tg?.HapticFeedback?.selectionChanged(); } catch (_) {}
-  try { if (_canVibrate()) navigator.vibrate(4); } catch (_) {}
-};
 const hapticOk = () => {
   if (_nativeHaptic("hapticOk", "")) return;
   try { tg?.HapticFeedback?.notificationOccurred("success"); } catch (_) {}
@@ -513,115 +508,135 @@ const VIEWS = ["chat", "diary", "profile"];   // порядок = порядок
 let curView = "chat";
 const viewEl = (v) => $(v === "chat" ? "chatView" : v === "diary" ? "diaryView" : "profileView");
 
+const SWIPE_IN_MS = 240;
+const IN_CLASS = { 1: "swipe-in-left", "-1": "swipe-in-right" };
+const OUT_CLASS = { 1: "swipe-out-left", "-1": "swipe-out-right" };
+
 function switchView(view, animate) {
-  const dir = VIEWS.indexOf(view) - VIEWS.indexOf(curView); // >0 — вправо, <0 — влево
+  const dir = Math.sign(VIEWS.indexOf(view) - VIEWS.indexOf(curView)); // 1 — вправо, -1 — влево
   document.querySelectorAll(".tab-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   $("chatView").hidden = view !== "chat";
   $("profileView").hidden = view !== "profile";
   $("diaryView").hidden = view !== "diary";
-  if (animate && dir !== 0) {
-    const el = viewEl(view);
-    el.classList.remove("view-slide-right", "view-slide-left");
-    void el.offsetWidth;                       // рестарт анимации
-    el.classList.add(dir > 0 ? "view-slide-right" : "view-slide-left");
-    setTimeout(() => el.classList.remove("view-slide-right", "view-slide-left"), 300);
-  }
+  if (animate && dir !== 0) playIn(viewEl(view), dir);
   curView = view;
   if (view === "profile") loadProfile();
   if (view === "chat") { hydrateChat(); scrollChatBottom(); }   // открываем на последних сообщениях
   if (view === "diary") loadDiary();
 }
 
-/* палец-фолоу свайп: страница едет за пальцем, соседняя въезжает сбоку.
-   оверлей-слой ставится ТОЛЬКО на время жеста — вне свайпа вёрстка не меняется. */
+/* приход новой вкладки: въезжает размытой и наводится на резкость.
+   класс снимаем по таймеру, а не по animationend: при reduce-motion анимации
+   нет вовсе, событие не приходит — и вкладка залипла бы в этом классе. */
+function playIn(el, dir) {
+  if (!el) return;
+  const cls = IN_CLASS[dir];
+  el.classList.remove("swipe-in-left", "swipe-in-right");
+  void el.offsetWidth;                          // рестарт анимации
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), SWIPE_IN_MS + 40);
+}
+
+/* ── свайп между вкладками ──
+ *
+ * Экран НЕ едет за пальцем один-в-один и соседняя вкладка не выезжает встык:
+ * так делали раньше, и жёсткая кромка, пролетающая через весь экран, читалась
+ * как подмена кадра. Здесь экран лишь слегка поддаётся (FOLLOW), а на
+ * отпускании уходит со смазом и новый приходит со смазом — движение видно,
+ * стыка нет.
+ *
+ * Соседний слой не поднимается вовсе: вкладки и так position:fixed, каждая со
+ * своим скроллом, поэтому двигаем прямо её — без оверлеев, без компенсации
+ * прокрутки и без восстановления после оборванного жеста.
+ */
+const FOLLOW = 0.55;         // насколько экран идёт за пальцем: меньше единицы — жест упругий
+const EDGE_FOLLOW = 0.16;    // на краю цикла почти не поддаётся: видно, что дальше вкладок нет
+const SWIPE_OUT_MS = 170;
+
+/* swipeTarget:start — чистая функция, её же гоняет webapp/swipe.test.js */
+const COMMIT_PX = 68;        // либо утащили достаточно далеко…
+const COMMIT_SPEED = 0.5;    // …либо резко смахнули (px/мс)
+
+/* Куда ведёт жест — или null, если вкладка не меняется.
+   Отдельная чистая функция: решение нетривиальное (порог по расстоянию ИЛИ по
+   скорости, края цикла), а проверять его настоящим жестом дорого — WebKit не
+   даёт собрать TouchEvent руками. */
+function swipeTarget(views, view, dx, elapsedMs) {
+  const idx = views.indexOf(view);
+  if (idx < 0) return null;
+  const speed = Math.abs(dx) / Math.max(1, elapsedMs);
+  if (Math.abs(dx) <= COMMIT_PX && speed <= COMMIT_SPEED) return null;
+  return views[idx + (dx < 0 ? 1 : -1)] || null;   // палец влево — следующая вкладка
+}
+/* swipeTarget:end */
+
 function setupSwipe() {
   const app = $("app");
-  let sx = 0, sy = 0, locked = null, vw = 0, from = null, to = null, sign = 0, dragging = false, fromScroll = 0, crossed = false;
-  const scrollTop = () => window.scrollY || document.documentElement.scrollTop || 0;
+  let g = null;                // {x, y, t, lock} — состояние текущего жеста
+  let host = null;             // вкладка, которую двигаем
+  let busy = false;            // идёт анимация перехода: новый жест не начинаем
 
-  const reHide = () => {
-    $("chatView").hidden = curView !== "chat";
-    $("diaryView").hidden = curView !== "diary";
-    $("profileView").hidden = curView !== "profile";
+  const shift = (px) => {
+    if (host) host.style.transform = px === 0 ? "" : `translate3d(${px}px,0,0)`;
+  };
+  const release = () => {
+    if (host) { host.classList.remove("swipe-dragging"); host.classList.add("swipe-settle"); }
+    g = null;
   };
 
-  /* смаз на жесте: уходящая вью расфокусируется по мере ухода, входящая наводится
-     на резкость. blur считаем от пройденного пути — «доводка фокуса» за пальцем.
-     reduce-motion выключает: постоянный пересчёт blur укачивает сильнее слайда. */
-  const BLUR_MAX = 7;
-  const calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const focus = (el, px) => { if (!calm && el) el.style.filter = px > 0.05 ? `blur(${px.toFixed(2)}px)` : ""; };
-
   app.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) { locked = "v"; return; }
-    if (e.target.closest("input, textarea, .mood-chart, .trend-wrap, .diary-menu, .test-modal, .test-sheet, .pf-box")) { locked = "v"; return; }
-    sx = e.touches[0].clientX; sy = e.touches[0].clientY; vw = window.innerWidth;
-    locked = null; dragging = false;
+    if (busy || e.touches.length !== 1) return;
+    if (e.target.closest("input, textarea, .mood-chart, .trend-wrap, .diary-menu, .test-modal, .test-sheet, .pf-box")) return;
+    const t = e.touches[0];
+    g = { x: t.clientX, y: t.clientY, t: performance.now(), lock: "none" };
   }, { passive: true });
 
   app.addEventListener("touchmove", (e) => {
-    if (locked === "v") return;
-    const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
-    if (!locked) {
+    if (!g) return;
+    const t = e.touches[0];
+    const dx = t.clientX - g.x, dy = t.clientY - g.y;
+    if (g.lock === "none") {
+      // направление решаем по первым 12 px и больше не пересматриваем, иначе
+      // прокрутка списка на полпути срывается в свайп
       if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
-      if (Math.abs(dx) < Math.abs(dy) * 1.3) { locked = "v"; return; }   // вертикаль → нативный скролл
-      const i = VIEWS.indexOf(curView), ti = dx < 0 ? i + 1 : i - 1;
-      if (ti < 0 || ti >= VIEWS.length) { locked = "v"; return; }        // нет соседа
-      locked = "h"; dragging = true; sign = dx < 0 ? 1 : -1; crossed = false;
-      haptic("light");                                                   // тактильный старт свайпа
-      fromScroll = scrollTop();                                          // запоминаем прокрутку, чтобы не прыгало
-      from = viewEl(curView); to = viewEl(VIEWS[ti]);
-      to.hidden = false;
-      from.classList.add("swipe-layer"); to.classList.add("swipe-layer");
-      from.style.transform = `translate(0px, ${-fromScroll}px)`;
-      to.style.transform = `translateX(${sign * vw}px)`;
-      focus(from, 0); focus(to, BLUR_MAX);
+      g.lock = Math.abs(dx) > Math.abs(dy) * 1.3 ? "x" : "y";
+      if (g.lock !== "x") return;
+      host = viewEl(curView);
+      host.classList.remove("swipe-settle");
+      host.classList.add("swipe-host", "swipe-dragging");
+      haptic("light");
     }
-    if (locked === "h") {
-      e.preventDefault();
-      let d = Math.max(-vw, Math.min(vw, e.touches[0].clientX - sx));
-      if ((sign > 0 && d > 0) || (sign < 0 && d < 0)) d = 0;            // не тянуть в пустую сторону
-      const past = Math.abs(d) > vw * 0.25;                            // порог переключения
-      if (past !== crossed) { crossed = past; hapticSel(); }           // тактильная засечка на пороге
-      from.style.transform = `translate(${d}px, ${-fromScroll}px)`;
-      to.style.transform = `translateX(${sign * vw + d}px)`;
-      const p = Math.min(1, Math.abs(d) / vw);
-      focus(from, BLUR_MAX * p); focus(to, BLUR_MAX * (1 - p));
-    }
-  }, { passive: false });
+    if (g.lock !== "x") return;
+    const idx = VIEWS.indexOf(curView);
+    const atEdge = (dx > 0 && idx === 0) || (dx < 0 && idx === VIEWS.length - 1);
+    shift(dx * (atEdge ? EDGE_FOLLOW : FOLLOW));
+  }, { passive: true });   // горизонталь забирает touch-action: pan-y, preventDefault не нужен
 
   app.addEventListener("touchend", (e) => {
-    if (locked !== "h" || !dragging) { locked = null; return; }
-    const d = e.changedTouches[0].clientX - sx;
-    const commit = Math.abs(d) > vw * 0.25;
-    const fEl = from, tEl = to, s = sign, fs = fromScroll;
-    const target = commit ? VIEWS[VIEWS.indexOf(curView) + (s > 0 ? 1 : -1)] : null;
-    fEl.classList.add("animate"); tEl.classList.add("animate");
-    fEl.style.transform = `translate(${commit ? -s * vw : 0}px, ${-fs}px)`;
-    tEl.style.transform = `translateX(${commit ? 0 : s * vw}px)`;
-    focus(fEl, commit ? BLUR_MAX : 0); focus(tEl, commit ? 0 : BLUR_MAX);   // доводка фокуса тем же переходом
-    if (commit) haptic();
+    if (!g || g.lock !== "x") { g = null; return; }
+    const dx = e.changedTouches[0].clientX - g.x;
+    const target = swipeTarget(VIEWS, curView, dx, performance.now() - g.t);
+    const el = host;
+    release();
+    shift(0);
+    if (!target || !el) return;
+
+    haptic();
+    busy = true;
+    const dir = dx < 0 ? 1 : -1;
+    const out = OUT_CLASS[dir];
+    el.classList.add(out);
     setTimeout(() => {
-      fEl.classList.remove("swipe-layer", "animate"); tEl.classList.remove("swipe-layer", "animate");
-      fEl.style.transform = ""; tEl.style.transform = "";
-      fEl.style.filter = ""; tEl.style.filter = "";
-      if (commit && target) switchView(target, false);
-      else window.scrollTo(0, fs);                                      // отмена — вернуть прокрутку на место
-      reHide();
-    }, 260);
-    locked = null; dragging = false; from = to = null;
+      el.classList.remove(out, "swipe-settle", "swipe-host");
+      el.style.transform = "";
+      switchView(target, true);     // приход новой вкладки рисует switchView
+      busy = false;
+    }, SWIPE_OUT_MS);
   }, { passive: true });
 
-  // iOS может оборвать жест (системный свайп/конфликт скролла) без touchend —
-  // тогда вью оставалась бы как swipe-layer, сдвинутая за экран («страницы не видно»). сбрасываем.
-  const cancelSwipe = () => {
-    [from, to].forEach((el) => {
-      if (el) { el.classList.remove("swipe-layer", "animate"); el.style.transform = ""; el.style.filter = ""; }
-    });
-    reHide();
-    locked = null; dragging = false; from = to = null;
-  };
-  app.addEventListener("touchcancel", cancelSwipe, { passive: true });
+  // iOS обрывает жест системным свайпом или конфликтом скролла — без этого
+  // вкладка осталась бы сдвинутой
+  app.addEventListener("touchcancel", () => { release(); shift(0); }, { passive: true });
 }
 
 /* живой синк: пока открыт чат — тихо подтягиваем канон из БД (одна база на TG и апп).
