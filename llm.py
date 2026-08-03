@@ -47,15 +47,27 @@ def _openai_model_fast() -> str:
     return agent_config.cfg("model_chat", os.environ.get("OPENAI_MODEL_FAST", "gpt-5-mini")).strip()
 
 
-# какой OpenAI-моделью крыть каждую задачу
+def _bg_model() -> str:
+    """Модель для машинной работы: подсчёт настроя, выжимка заметок, чистка записи,
+    отклик на дневник. Это разбор текста в JSON и причёсывание, а не разговор с
+    человеком — флагман здесь не слышнее дешёвой модели, но стоит вдесятеро.
+    Раньше всё это шло на model_chat и молча съедало счёт вместе с диалогом."""
+    import agent_config
+    return (agent_config.cfg("model_bg", "") or "").strip() or _openai_model_fast()
+
+
+# какой моделью крыть каждую задачу
 def _openai_model_for_task(task: str | None) -> str | None:
     if not _openai_key():
         return None
-    # глубокие задачи → «умная» модель (OPENAI_MODEL, напр. Gemini 3.1 Pro):
-    # портрет (analysis), итоги недели (reasoning), /ask (deep).
-    # чат и фон → быстрая (OPENAI_MODEL_FAST, напр. Gemini 3 Flash).
-    deep_tasks = {"analysis", "reasoning", "deep"}
-    return _openai_model() if task in deep_tasks else _openai_model_fast()
+    # портрет (analysis), итоги недели (reasoning), /ask (deep) → «умная» model_deep
+    # фон (fast) → дешёвая model_bg
+    # разговор (dialog) → model_chat, тот самый флагман
+    if task in {"analysis", "reasoning", "deep"}:
+        return _openai_model()
+    if task == "fast":
+        return _bg_model()
+    return _openai_model_fast()
 
 
 # Specialist routing: разные модели под разные задачи.
@@ -100,6 +112,10 @@ agent_config.register("model_chat", os.environ.get("OPENAI_MODEL_FAST", "google/
                       "Модель: чат · дневник · фон", "Быстрая модель для диалога, дневника, фоновых задач (extract/чистка/роутер). «/» = OpenRouter.", "model", 1)
 agent_config.register("model_deep", os.environ.get("OPENAI_MODEL", "google/gemini-3.1-pro-preview"),
                       "Модель: портрет · итоги · /ask", "Умная модель для портрета, итогов недели и /ask. «/» = OpenRouter.", "model", 2)
+agent_config.register("model_bg", "google/gemini-3-flash-preview", "Модель: фоновая работа",
+                      "Настрой за 10 дней, выжимка заметок, отклик на дневник, чистка записи. "
+                      "Это разбор текста, а не разговор: флагман здесь не слышнее, но дороже в разы. "
+                      "Пусто — берётся модель чата.", "model", 4)
 
 # ───────────── два агента: «аналитик» (DeepSeek) → «редактор-голос» (Sonnet) ─────────────
 # Агент 1 (DeepSeek) силён в сути/анализе, но слаб в живом русском (кальки, канцелярит,
@@ -254,12 +270,28 @@ def _sys_for_model(model: str, base_sys: str) -> str:
 #
 # У Gemini и DeepSeek кэш включается сам, ставить точку не нужно и нечем —
 # им отдаём обычную строку.
+#
+# Срок жизни кэша. По умолчанию у Anthropic 5 минут — это про очередь реплик
+# подряд. Разговор с психологом идёт с паузами: человек написал, подумал, вернулся
+# через полчаса — и платит за личность заново. Часовой кэш это закрывает, но
+# запись в него стоит 2× от входа вместо 1.25×.
+#
+# Где перелом: лишняя запись стоит 0.75× входа, зато каждое попадание экономит
+# 0.9×. То есть часовой кэш окупается, если он ловит хотя бы одно обращение,
+# которое пятиминутный бы упустил. Для пауз в 5-60 минут — почти всегда.
 _CACHE_MIN_CHARS = 4000        # короткую голову кэшировать смысла нет
 _CACHE_VENDORS = ("anthropic/",)
+_CACHE_TTL_ALLOWED = {"5m", "1h"}
 
 
 def supports_cache_breakpoint(model: str) -> bool:
     return any(model.startswith(v) for v in _CACHE_VENDORS)
+
+
+def _cache_ttl() -> str:
+    import agent_config
+    ttl = (agent_config.cfg("cache_ttl", "1h") or "").strip()
+    return ttl if ttl in _CACHE_TTL_ALLOWED else "5m"
 
 
 def system_payload(model: str, sys_text: str, cacheable_chars: int = 0):
@@ -273,7 +305,11 @@ def system_payload(model: str, sys_text: str, cacheable_chars: int = 0):
             or cacheable_chars < _CACHE_MIN_CHARS or cacheable_chars > len(sys_text)):
         return sys_text
     head, tail = sys_text[:cacheable_chars], sys_text[cacheable_chars:]
-    parts = [{"type": "text", "text": head, "cache_control": {"type": "ephemeral"}}]
+    cc = {"type": "ephemeral"}
+    ttl = _cache_ttl()
+    if ttl != "5m":                    # 5m — умолчание провайдера, поле лишнее
+        cc["ttl"] = ttl
+    parts = [{"type": "text", "text": head, "cache_control": cc}]
     if tail.strip():
         parts.append({"type": "text", "text": tail})
     return parts
