@@ -242,6 +242,43 @@ def _sys_for_model(model: str, base_sys: str) -> str:
     return f + "\n\n" + base_sys if base_sys else f
 
 
+# ───────────── кэш системного промпта ─────────────
+# Личность psychologist'а — это ~15 тысяч токенов, и они уходят в КАЖДЫЙ запрос.
+# Именно вход, а не ответ, определяет счёт: при $5/M у Opus одна реплика стоит
+# 7-8 центов, из которых на ответ приходится меньше цента.
+#
+# Anthropic умеет кэшировать неизменную голову промпта: запись 1.25× от обычного
+# входа, чтение 0.1×. Один разговор = одна запись и дальше только чтения, то есть
+# порядок по цене на той же модели. OpenRouter это пробрасывает, если system
+# отдать не строкой, а списком частей с cache_control на последней статичной.
+#
+# У Gemini и DeepSeek кэш включается сам, ставить точку не нужно и нечем —
+# им отдаём обычную строку.
+_CACHE_MIN_CHARS = 4000        # короткую голову кэшировать смысла нет
+_CACHE_VENDORS = ("anthropic/",)
+
+
+def supports_cache_breakpoint(model: str) -> bool:
+    return any(model.startswith(v) for v in _CACHE_VENDORS)
+
+
+def system_payload(model: str, sys_text: str, cacheable_chars: int = 0):
+    """Содержимое system-сообщения: строка или список частей с точкой кэша.
+
+    cacheable_chars — сколько символов с начала неизменны от запроса к запросу
+    (душа, слои, ручки). Хвост — профиль и наблюдения — у каждого свой и живёт
+    за точкой: попади он внутрь, кэш ломался бы на каждом клиенте.
+    """
+    if (not sys_text or not supports_cache_breakpoint(model)
+            or cacheable_chars < _CACHE_MIN_CHARS or cacheable_chars > len(sys_text)):
+        return sys_text
+    head, tail = sys_text[:cacheable_chars], sys_text[cacheable_chars:]
+    parts = [{"type": "text", "text": head, "cache_control": {"type": "ephemeral"}}]
+    if tail.strip():
+        parts.append({"type": "text", "text": tail})
+    return parts
+
+
 # Фолбэк-цепочка: если нужная модель rate-limit, идём по альтернативам.
 # ТОЛЬКО живые модели (проверено запросом 29.07.2026). Прежний список из четырёх
 # :free-моделей целиком отдавал 404 — при сбое основной шёл перебор мертвецов,
@@ -363,22 +400,34 @@ class _Response:
         self.stop_reason = "end_turn"
 
 
-def _flatten_system(system: Any) -> str:
-    """Anthropic допускает system как str ИЛИ list[{'type':'text','text':...,'cache_control':...}].
-    OpenRouter принимает только str → склеиваем."""
+def _flatten_system(system: Any) -> tuple[str, int]:
+    """Склеивает блочный system в строку и говорит, где кончается кэшируемая голова.
+
+    Anthropic допускает system как str ИЛИ list[{'type':'text','text':…,'cache_control':…}].
+    Строку хотят все провайдеры, поэтому склеиваем — но запоминаем, сколько символов
+    занимают блоки по последний с cache_control включительно. Это и есть неизменная
+    голова промпта; на ней llm ставит точку кэша, если модель умеет (см. system_payload).
+    """
     if system is None:
-        return ""
+        return "", 0
     if isinstance(system, str):
-        return system
-    if isinstance(system, list):
-        parts = []
-        for b in system:
-            if isinstance(b, dict) and b.get("type") == "text":
-                parts.append(b.get("text", ""))
-            elif isinstance(b, str):
-                parts.append(b)
-        return "\n\n".join(p for p in parts if p)
-    return str(system)
+        return system, 0
+    if not isinstance(system, list):
+        return str(system), 0
+    parts, mark = [], 0
+    for b in system:
+        if isinstance(b, dict) and b.get("type") == "text":
+            text, cached = b.get("text", ""), bool(b.get("cache_control"))
+        elif isinstance(b, str):
+            text, cached = b, False
+        else:
+            continue
+        if not text:
+            continue
+        parts.append(text)
+        if cached:
+            mark = sum(len(p) for p in parts) + 2 * (len(parts) - 1)   # + разделители
+    return "\n\n".join(parts), mark
 
 
 def _flatten_content(content: Any) -> str:
@@ -407,7 +456,7 @@ class _Messages:
         task: str | None = None,
         **_ignored,
     ) -> _Response:
-        sys_text = _flatten_system(system)
+        sys_text, cache_head = _flatten_system(system)
         chat = []
         if sys_text:
             chat.append({"role": "system", "content": sys_text})
@@ -420,7 +469,7 @@ class _Messages:
         for m in models:
             try:
                 if has_sys:
-                    chat[0]["content"] = _sys_for_model(m, sys_text)   # пер-модельный фильтр
+                    chat[0]["content"] = system_payload(m, _sys_for_model(m, sys_text), cache_head)
                 return self._post(m, chat, max_tokens)
             except Exception as e:
                 last_err = e
@@ -469,7 +518,7 @@ def stream_completion_sync(
 ):
     """Синхронный генератор текстовых дельт (SSE), OpenAI→OpenRouter fallback по моделям.
     force — жёстко эта модель и только она (для humanizer-прохода Sonnet)."""
-    sys_text = _flatten_system(system)
+    sys_text, cache_head = _flatten_system(system)
     chat = []
     if sys_text:
         chat.append({"role": "system", "content": sys_text})
@@ -484,7 +533,7 @@ def stream_completion_sync(
             continue
         url, headers = ph
         if sys_text:
-            chat[0]["content"] = _sys_for_model(m, sys_text)   # пер-модельный фильтр
+            chat[0]["content"] = system_payload(m, _sys_for_model(m, sys_text), cache_head)
         body = {"model": m, "messages": chat, "stream": True, **_token_body(m, max_tokens)}
         got_any = False
         try:
@@ -528,7 +577,7 @@ async def stream_completion(
     task: str | None = None,
 ):
     """Async-генератор дельт текста (SSE), OpenAI→OpenRouter fallback по моделям."""
-    sys_text = _flatten_system(system)
+    sys_text, cache_head = _flatten_system(system)
     chat = []
     if sys_text:
         chat.append({"role": "system", "content": sys_text})
@@ -543,7 +592,7 @@ async def stream_completion(
             continue
         url, headers = ph
         if sys_text:
-            chat[0]["content"] = _sys_for_model(m, sys_text)   # пер-модельный фильтр
+            chat[0]["content"] = system_payload(m, _sys_for_model(m, sys_text), cache_head)
         body = {"model": m, "messages": chat, "stream": True, **_token_body(m, max_tokens)}
         try:
             async with httpx.AsyncClient(timeout=180) as cli:

@@ -76,12 +76,17 @@ def user_system(compiled_profile: str, insights: str = "") -> list:
     tuned = _dials_block()
     if tuned:
         blocks.append({"type": "text", "text": tuned})
+    # Точка кэша — здесь, на границе «общее / личное». Всё выше (душа, слои, ручки)
+    # одинаково для всех клиентов и от запроса к запросу не меняется: это ~15 тысяч
+    # токенов, за которые иначе платишь каждый раз заново. Всё ниже — профиль и
+    # наблюдения, у каждого свои; попади они внутрь, кэш ломался бы на каждом клиенте.
+    if blocks:
+        blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
     cp = (compiled_profile or "").strip()
     if cp:
         blocks.append({
             "type": "text",
             "text": f"<профиль_клиента>\n{cp}\n</профиль_клиента>",
-            "cache_control": {"type": "ephemeral"},
         })
     else:
         blocks.append({
@@ -96,7 +101,6 @@ def user_system(compiled_profile: str, insights: str = "") -> list:
                      "\n</что_узнал_в_работе>\n"
                      "это твои живые наблюдения за этим человеком из прошлых сессий. "
                      "опирайся на них, давай более точные и персональные ходы. не зачитывай их вслух."),
-            "cache_control": {"type": "ephemeral"},
         })
     return blocks
 

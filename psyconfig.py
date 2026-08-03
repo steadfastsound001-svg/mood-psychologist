@@ -179,27 +179,42 @@ def layers_info() -> list[dict]:
 # Модели, проверенные живым запросом 30.07.2026. Поле в панели остаётся вводимым —
 # новая модель не требует правки кода. temperament — вклад модели в портрет характера
 # (см. формулу в панели): depth глубина, tempo скорость, warmth тепло, edge острота.
+# Цена в заметке — за ОДНУ реплику на этом промпте (~11.5k токенов входа + короткий
+# ответ), а не абстрактные $/миллион. Здесь платит вход: личность уходит в каждый
+# запрос целиком, и на ответ приходится меньше десятой части счёта.
+# «по кэшу» — цена со второй реплики подряд: голова промпта у Anthropic кэшируется
+# (см. llm.system_payload), чтение стоит 0.1 от обычного входа.
 KNOWN_MODELS = [
-    {"id": "anthropic/claude-opus-5", "note": "флагман · глубина и точность · ~17с в диалоге",
+    {"id": "anthropic/claude-opus-5", "note": "флагман · глубина и точность · ~17с · $0.064, по кэшу $0.012",
      "tier": "флагман", "temperament": {"depth": 1.0, "tempo": 0.15, "warmth": 0.75, "edge": 0.6}},
-    {"id": "anthropic/claude-sonnet-5", "note": "сильная и живая · ~4с",
+    {"id": "anthropic/claude-sonnet-5", "note": "живая и глубокая · ~4с · $0.026, по кэшу $0.005 — лучший баланс",
      "tier": "сильная", "temperament": {"depth": 0.8, "tempo": 0.5, "warmth": 0.8, "edge": 0.55}},
-    {"id": "anthropic/claude-sonnet-4.6", "note": "живой голос, привычный редактор · ~5с",
+    {"id": "anthropic/claude-sonnet-4.6", "note": "живой голос, привычный редактор · ~5с · $0.039, по кэшу $0.007",
      "tier": "сильная", "temperament": {"depth": 0.7, "tempo": 0.5, "warmth": 0.85, "edge": 0.5}},
     {"id": "anthropic/claude-opus-4.5", "note": "прежний флагман · ~2с",
      "tier": "сильная", "temperament": {"depth": 0.85, "tempo": 0.6, "warmth": 0.7, "edge": 0.6}},
-    {"id": "openai/gpt-5.2", "note": "быстрая и структурная · ~1с",
+    {"id": "anthropic/claude-haiku-4.5", "note": "быстрая · ~3с · $0.013, по кэшу $0.003",
+     "tier": "быстрая", "temperament": {"depth": 0.4, "tempo": 0.9, "warmth": 0.6, "edge": 0.4}},
+    {"id": "openai/gpt-5.2", "note": "быстрая и структурная · ~1с · $0.024 · кэш не ставим",
      "tier": "быстрая", "temperament": {"depth": 0.65, "tempo": 0.95, "warmth": 0.4, "edge": 0.7}},
     {"id": "openai/gpt-5.1", "note": "структурная · ~2с",
      "tier": "быстрая", "temperament": {"depth": 0.6, "tempo": 0.85, "warmth": 0.4, "edge": 0.7}},
-    {"id": "google/gemini-3-flash-preview", "note": "самая быстрая для черновика · ~1.5с",
+    {"id": "google/gemini-3-flash-preview", "note": "самая быстрая · ~1.5с · $0.007 · кэш у неё свой",
      "tier": "быстрая", "temperament": {"depth": 0.35, "tempo": 1.0, "warmth": 0.5, "edge": 0.45}},
-    {"id": "anthropic/claude-haiku-4.5", "note": "быстрая, для фоновых задач · ~3с",
-     "tier": "быстрая", "temperament": {"depth": 0.4, "tempo": 0.9, "warmth": 0.6, "edge": 0.4}},
     {"id": "google/gemini-3.1-pro-preview", "note": "глубокие задачи, портрет и итоги · ~3с",
      "tier": "сильная", "temperament": {"depth": 0.8, "tempo": 0.55, "warmth": 0.45, "edge": 0.5}},
+    {"id": "deepseek/deepseek-chat", "note": "самая дешёвая из вменяемых · $0.003 · русский ровный, но суховат",
+     "tier": "дешёвая", "temperament": {"depth": 0.6, "tempo": 0.6, "warmth": 0.4, "edge": 0.6}},
+    {"id": "mistralai/mistral-large-2512", "note": "дешёвая, тёплая · $0.006",
+     "tier": "дешёвая", "temperament": {"depth": 0.6, "tempo": 0.6, "warmth": 0.6, "edge": 0.45}},
+    {"id": "moonshotai/kimi-k2-thinking", "note": "рассуждающая, дешёвая · $0.008 · медленнее",
+     "tier": "дешёвая", "temperament": {"depth": 0.8, "tempo": 0.3, "warmth": 0.45, "edge": 0.6}},
+    {"id": "qwen/qwen3-max", "note": "дешёвая · $0.010 · склонна к вежливости, гасится фильтром",
+     "tier": "дешёвая", "temperament": {"depth": 0.6, "tempo": 0.6, "warmth": 0.65, "edge": 0.35}},
     {"id": "deepseek/deepseek-v4-pro", "note": "рассуждающая · тормозит на длинном промпте",
      "tier": "рассуждающая", "temperament": {"depth": 0.85, "tempo": 0.2, "warmth": 0.35, "edge": 0.75}},
+    {"id": "google/gemma-4-26b-a4b-it:free", "note": "бесплатная · последний рубеж, когда кончились деньги",
+     "tier": "бесплатная", "temperament": {"depth": 0.35, "tempo": 0.8, "warmth": 0.6, "edge": 0.3}},
 ]
 
 
