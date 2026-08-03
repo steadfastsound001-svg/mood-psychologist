@@ -7,23 +7,33 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400..600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..700&display=swap">
 <style>
-/* ─────────── Liquid Glass: слои поверх живого фона, минимум хрома ─────────── */
+/* ─────────── Liquid Glass: слои поверх живого фона, минимум хрома ───────────
+ *
+ * Шрифт один на всю панель — Inter. Прежняя пара Manrope + Fraunces работает в
+ * приложении, где серифный заголовок — часть характера; в инструменте он только
+ * шумит. Inter здесь ближе всего к системному SF: оптические размеры, узкие
+ * межбуквенные, спокойные цифры.
+ */
 :root{
-  --bg:#0d0b09; --ink:#f2ede4; --dim:#9d968a; --faint:#6b665d;
+  --bg:#0c0a09; --ink:#f4f1ec; --dim:#a09a91; --faint:#6e6961;
   --accent:#c0a080; --accent-2:#4f8a82; --bad:#c9705a;
-  --glass:rgba(255,255,255,.055);
-  --glass-hi:rgba(255,255,255,.13);
-  --stroke:rgba(255,255,255,.09);
-  --r:26px;
+  /* стекло: две плотности — карточки и то, что лежит поверх них */
+  --glass:rgba(255,255,255,.045);
+  --glass-2:rgba(255,255,255,.075);
+  --glass-hi:rgba(255,255,255,.10);
+  --stroke:rgba(255,255,255,.07);
+  --r:24px;
+  --ease:cubic-bezier(.32,.72,0,1);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 body{
   background:var(--bg); color:var(--ink); min-height:100vh;
-  font:400 15px/1.5 Manrope,-apple-system,BlinkMacSystemFont,sans-serif;
-  letter-spacing:-.01em; -webkit-font-smoothing:antialiased;
+  font:400 15px/1.5 Inter,-apple-system,BlinkMacSystemFont,sans-serif;
+  font-optical-sizing:auto;
+  letter-spacing:-.014em; -webkit-font-smoothing:antialiased;
   padding:0 20px 80px; overflow-x:hidden;
 }
 /* живой фон — из-за него у стекла есть что преломлять */
@@ -40,35 +50,57 @@ body::before{
 @media (prefers-reduced-motion:reduce){body::before{animation:none}}
 
 .wrap{max-width:760px;margin:0 auto}
-header{padding:40px 4px 22px}
-h1{
-  font:600 30px/1.1 Fraunces,Georgia,serif; letter-spacing:.4px;
-  font-variation-settings:"SOFT" 40,"opsz" 144;
+/* шапка: слева кто и на чём, справа — кнопка пульса. Вкладок нет: личность и
+   есть панель, а пульс — сводка на минуту, ей хватает всплывающего листа. */
+header{
+  padding:34px 2px 20px; display:flex; align-items:flex-start; gap:14px;
 }
-.sub{color:var(--dim); font-size:13px; margin-top:7px}
+.h-l{flex:1;min-width:0}
+h1{font:600 27px/1.15 Inter,sans-serif; letter-spacing:-.03em}
+.sub{color:var(--dim); font-size:13px; margin-top:6px; letter-spacing:-.01em}
 
 .glass{
   background:var(--glass);
-  backdrop-filter:blur(28px) saturate(180%); -webkit-backdrop-filter:blur(28px) saturate(180%);
+  backdrop-filter:blur(30px) saturate(170%); -webkit-backdrop-filter:blur(30px) saturate(170%);
   border:1px solid var(--stroke); border-radius:var(--r);
-  box-shadow:0 1px 0 var(--glass-hi) inset, 0 18px 48px rgba(0,0,0,.34);
+  box-shadow:0 .5px 0 var(--glass-hi) inset, 0 14px 40px rgba(0,0,0,.3);
 }
 
-nav{
-  display:flex; gap:2px; padding:4px; margin-bottom:22px;
-  position:sticky; top:14px; z-index:20;
+/* кнопка пульса — как аватар профиля: круглая, в правом верхнем углу */
+#pulseBtn{
+  flex:0 0 auto; width:44px; height:44px; border-radius:50%; cursor:pointer;
+  border:1px solid var(--stroke); background:var(--glass-2); color:var(--dim);
+  backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  display:grid; place-items:center;
+  box-shadow:0 .5px 0 var(--glass-hi) inset;
+  transition:color .2s, transform .25s var(--ease), background .25s;
 }
-nav button{
-  flex:1; padding:11px 8px; border:0; border-radius:19px; cursor:pointer;
-  background:transparent; color:var(--dim); font:600 13px Manrope,sans-serif;
-  letter-spacing:.2px; transition:color .25s, background .35s cubic-bezier(.32,.72,0,1);
+#pulseBtn:hover{color:var(--ink); background:rgba(255,255,255,.1)}
+#pulseBtn:active{transform:scale(.94)}
+#pulseBtn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+/* точка-индикатор: горит, когда в пульсе есть на что смотреть */
+#pulseBtn.alarm{color:var(--bad);border-color:rgba(201,112,90,.4)}
+
+/* пульс — лист поверх, а не вкладка */
+#pulseSheet{
+  position:fixed; inset:0; z-index:70; display:flex; justify-content:center;
+  align-items:flex-start; padding:max(18px,env(safe-area-inset-top)) 16px 24px;
+  overflow-y:auto; background:rgba(8,7,6,.5);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  animation:sheetIn .3s var(--ease);
 }
-nav button[aria-selected="true"]{
-  color:var(--ink);
-  background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.06));
-  box-shadow:0 1px 0 var(--glass-hi) inset, 0 4px 14px rgba(0,0,0,.22);
+#pulseSheet.hid{display:none}
+#pulseSheet .sheet{width:100%;max-width:620px;padding:8px 8px 14px;display:grid;gap:12px}
+.sheet-h{display:flex;align-items:center;gap:12px;padding:8px 10px 2px}
+.sheet-h .t{font:600 15px Inter,sans-serif;letter-spacing:-.02em;flex:1}
+.sheet-h button{
+  width:34px;height:34px;border-radius:50%;border:1px solid var(--stroke);
+  background:var(--glass-2);color:var(--dim);cursor:pointer;font-size:15px;line-height:1;
 }
-nav button:active{transform:scale(.97)}
+.sheet-h button:active{transform:scale(.94)}
+@keyframes sheetIn{from{opacity:0;transform:translateY(10px);filter:blur(6px)}}
+@media (prefers-reduced-motion:reduce){#pulseSheet{animation:none}}
 
 section{display:grid; gap:14px; animation:rise .4s cubic-bezier(.32,.72,0,1)}
 @keyframes rise{from{opacity:0;transform:translateY(9px)}}
@@ -76,13 +108,13 @@ section{display:grid; gap:14px; animation:rise .4s cubic-bezier(.32,.72,0,1)}
 
 .card{padding:20px 22px}
 .card h2{
-  font:600 12px Manrope,sans-serif; letter-spacing:1.3px; text-transform:uppercase;
+  font:600 12px Inter,sans-serif; letter-spacing:.02em; text-transform:none;
   color:var(--faint); margin-bottom:14px;
 }
 
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px}
 .tile{padding:15px 16px;border-radius:19px;background:rgba(255,255,255,.04);border:1px solid var(--stroke)}
-.tile .n{font:600 25px/1 Fraunces,Georgia,serif;font-variant-numeric:tabular-nums}
+.tile .n{font:600 25px/1 Inter,sans-serif;font-variant-numeric:tabular-nums}
 .tile .k{font-size:11px;color:var(--dim);margin-top:6px;letter-spacing:.3px}
 
 .row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.05)}
@@ -112,7 +144,7 @@ summary .m{font-size:11px;color:var(--faint)}
 details.fold{border-bottom:0}
 details.fold > summary{padding:0}
 details.fold > summary .t{
-  font:600 12px Manrope,sans-serif; letter-spacing:1.3px; text-transform:uppercase; color:var(--faint);
+  font:600 12px Inter,sans-serif; letter-spacing:.02em; text-transform:none; color:var(--faint);
 }
 details.fold[open] > summary{margin-bottom:8px}
 .fold-b{animation:foldIn .26s cubic-bezier(.32,.72,0,1)}
@@ -129,14 +161,14 @@ textarea,input,select{
 textarea:focus,input:focus,select:focus{outline:0;border-color:rgba(192,160,128,.5);background:rgba(0,0,0,.4)}
 textarea[readonly]{color:var(--dim);border-style:dashed;cursor:default}
 textarea[readonly]:focus{border-color:var(--stroke);background:rgba(0,0,0,.28)}
-select{font-family:Manrope,sans-serif;font-size:13px;cursor:pointer}
+select{font-family:Inter,sans-serif;font-size:13px;cursor:pointer}
 select option{background:#171310}
 
 .acts{display:flex;gap:8px;margin:11px 0 15px;align-items:center;flex-wrap:wrap}
 button.b{
   padding:10px 17px;border:1px solid var(--stroke);border-radius:15px;cursor:pointer;
   background:rgba(255,255,255,.07); color:var(--ink);
-  font:600 13px Manrope,sans-serif; letter-spacing:.2px;
+  font:600 13px Inter,sans-serif; letter-spacing:.2px;
   transition:transform .18s cubic-bezier(.32,.72,0,1), background .2s;
 }
 button.b:hover{background:rgba(255,255,255,.12)}
@@ -152,7 +184,7 @@ button.b.ghost{background:transparent;color:var(--dim)}
 .him{align-self:flex-start;background:rgba(255,255,255,.055);border:1px solid var(--stroke)}
 .meta{font-size:11px;color:var(--faint);padding:2px 4px}
 .ask{display:flex;gap:9px;margin-top:13px}
-.ask input{margin:0;font-family:Manrope,sans-serif;font-size:14px}
+.ask input{margin:0;font-family:Inter,sans-serif;font-size:14px}
 
 /* ручки характера */
 .dial{padding:14px 0;border-bottom:1px solid rgba(255,255,255,.05)}
@@ -196,15 +228,17 @@ a{color:var(--accent);text-decoration:none}
 .sb-r{display:flex;gap:8px;flex:0 0 auto}
 #savedFlash{
   position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:70;
-  padding:12px 22px;font:600 13px Manrope,sans-serif;color:var(--accent-2);
+  padding:12px 22px;font:600 13px Inter,sans-serif;color:var(--accent-2);
   transition:opacity .3s
 }
 #savedFlash.hid{opacity:0;pointer-events:none}
 
 /* загрузка: контент под матовым стеклом, пока данные в пути */
-.wrap.loading{filter:blur(9px) saturate(.7);opacity:.5;pointer-events:none;
-  transition:filter .45s cubic-bezier(.32,.72,0,1),opacity .45s}
-.wrap{transition:filter .45s cubic-bezier(.32,.72,0,1),opacity .45s}
+/* обе стороны заданы явно: filter не интерполируется в none — если оставить
+   «блюр → ничего», значение залипает на blur(9px) и панель остаётся мутной */
+.wrap{filter:blur(0) saturate(1);opacity:1;
+  transition:filter .45s var(--ease),opacity .45s var(--ease)}
+.wrap.loading{filter:blur(9px) saturate(.7);opacity:.5;pointer-events:none}
 #loader{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:15px;pointer-events:none;
   transition:opacity .4s}
@@ -224,7 +258,7 @@ a{color:var(--accent);text-decoration:none}
 .portrait{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
 .portrait svg{flex:0 0 190px;width:190px;height:190px}
 .pt-word{flex:1;min-width:190px}
-.pt-line{font:600 19px/1.35 Fraunces,Georgia,serif;font-variation-settings:"SOFT" 40}
+.pt-line{font:600 19px/1.35 Inter,sans-serif;letter-spacing:-.02em}
 .pt-sub{font-size:12px;color:var(--dim);margin-top:9px;line-height:1.55}
 .pt-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .tag{font-size:11px;padding:5px 10px;border-radius:11px;background:rgba(192,160,128,.14);
@@ -251,7 +285,7 @@ a{color:var(--accent);text-decoration:none}
 @media(max-width:560px){.mnote{padding-left:0}}
 .switch{display:flex;gap:5px}
 .switch button{padding:8px 15px;border:1px solid var(--stroke);border-radius:12px;cursor:pointer;
-  background:rgba(255,255,255,.04);color:var(--dim);font:600 12px Manrope,sans-serif;transition:all .25s}
+  background:rgba(255,255,255,.04);color:var(--dim);font:600 12px Inter,sans-serif;transition:all .25s}
 .switch button[aria-selected="true"]{background:linear-gradient(180deg,rgba(192,160,128,.9),rgba(166,124,82,.85));
   color:#211a12;border-color:transparent}
 
@@ -263,7 +297,7 @@ a{color:var(--accent);text-decoration:none}
 .layer.drag{opacity:.35;cursor:grabbing}
 .layer.over{border-color:var(--accent);background:rgba(192,160,128,.12)}
 .layer .grip{color:var(--faint);font-size:15px;letter-spacing:2px;line-height:1}
-.layer .num{font:600 12px Fraunces,Georgia,serif;color:var(--accent);min-width:16px}
+.layer .num{font:600 12px Inter,sans-serif;color:var(--accent);min-width:16px}
 .layer .lt{flex:1;font-size:13px}
 .layer .lf{font-size:11px;color:var(--faint);font-family:ui-monospace,Menlo,monospace}
 .layer .lc{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
@@ -275,11 +309,11 @@ a{color:var(--accent);text-decoration:none}
 #probe.hid{transform:translateY(calc(100% + 26px));opacity:0;pointer-events:none}
 .probe-h{display:flex;align-items:center;justify-content:space-between;gap:10px;
   padding:14px 17px;border-bottom:1px solid var(--stroke)}
-.probe-h .t{font:600 13px Manrope,sans-serif;letter-spacing:.3px}
+.probe-h .t{font:600 13px Inter,sans-serif;letter-spacing:.3px}
 .probe-h button{background:none;border:0;color:var(--dim);font-size:19px;cursor:pointer;line-height:1;padding:0 3px}
 .probe-b{padding:13px 15px;overflow-y:auto;flex:1}
 #probeFab{position:fixed;right:18px;bottom:18px;z-index:59;padding:13px 20px;border:0;border-radius:17px;
-  cursor:pointer;font:600 13px Manrope,sans-serif;color:#211a12;
+  cursor:pointer;font:600 13px Inter,sans-serif;color:#211a12;
   background:linear-gradient(180deg,rgba(192,160,128,.95),rgba(166,124,82,.95));
   box-shadow:0 8px 26px rgba(0,0,0,.4),0 1px 0 rgba(255,255,255,.25) inset;
   transition:transform .2s cubic-bezier(.32,.72,0,1),opacity .3s}
@@ -296,17 +330,26 @@ a{color:var(--accent);text-decoration:none}
 
 <div class="wrap loading">
   <header>
-    <h1>центр управления</h1>
-    <div class="sub" id="sub">загружаю…</div>
+    <div class="h-l">
+      <h1>личность</h1>
+      <div class="sub" id="sub">загружаю…</div>
+    </div>
+    <button id="pulseBtn" title="пульс: люди, конфиг, детектор" aria-label="пульс">
+      <svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-7 4 14 2.5-7H21"/></svg>
+    </button>
   </header>
 
-  <nav class="glass" role="tablist">
-    <button role="tab" data-v="pulse" aria-selected="true">пульс</button>
-    <button role="tab" data-v="soul" aria-selected="false">личность</button>
-  </nav>
+  <section id="soul"></section>
+</div>
 
-  <section id="pulse"></section>
-  <section id="soul" hidden></section>
+<div id="pulseSheet" class="hid">
+  <div class="sheet">
+    <div class="sheet-h">
+      <span class="t">пульс</span>
+      <button id="pulseClose" title="закрыть">✕</button>
+    </div>
+    <div id="pulse"></div>
+  </div>
 </div>
 
 <div id="saveBar" class="glass hid">
@@ -595,7 +638,7 @@ function portraitCard() {
     svg.append(svgEl("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: "2.7", fill: "#c0a080" }));
     const [lx, ly] = pt(i, R + 14);
     svg.append(svgEl("text", { x: lx.toFixed(1), y: (ly + 3).toFixed(1), "font-size": "8",
-      fill: "#9d968a", "text-anchor": "middle", "font-family": "Manrope,sans-serif" }, TRAIT_TITLES[k] || k));
+      fill: "#9d968a", "text-anchor": "middle", "font-family": "Inter,sans-serif" }, TRAIT_TITLES[k] || k));
   });
 
   const box = e("div",{class:"portrait"});
@@ -902,24 +945,90 @@ async function reload(txt) {
   } finally { setLoading(false); }
 }
 
-async function reloadInner() {
+async function fetchCanon() {
   const [ov, cfg] = await Promise.all([api("/api/admin/overview"), api("/api/admin/config")]);
-  DATA = ov; ITEMS = cfg.items || [];
-  $("sub").textContent = `${ov.owner_email} · конфиг v${(ov.config || {}).version || "?"}`;
-  const active = document.querySelector('nav button[aria-selected="true"]');
-  VIEWS[active ? active.dataset.v : "pulse"]();
+  return { ov, items: cfg.items || [] };
 }
+
+/* отпечаток канона: по нему видно, изменилось ли что-то на самом деле */
+const canonSig = (c) => JSON.stringify([
+  (c.ov.config || {}).version, (c.ov.models || {}), (c.ov.safety || {}),
+  (c.ov.dials || {}).value, (c.ov.layers || []).map(l => l.file),
+  c.items.map(i => [i.key, i.value, i.overridden]),
+]);
+
+function applyCanon(c) {
+  DATA = c.ov; ITEMS = c.items;
+  $("sub").textContent = `${c.ov.owner_email} · конфиг v${(c.ov.config || {}).version || "?"}`;
+  renderSoul();
+  renderPulse();
+  paintAlarm();
+}
+
+async function reloadInner() {
+  applyCanon(await fetchCanon());
+}
+
+/* кнопка пульса горит, когда там есть о чём беспокоиться — иначе туда можно не ходить */
+function paintAlarm() {
+  const { config = {}, safety = {} } = DATA || {};
+  const bad = (config.problems || []).length > 0 || !safety.markers_ok;
+  $("pulseBtn").classList.toggle("alarm", bad);
+  $("pulseBtn").title = bad ? "пульс: есть проблемы" : "пульс: люди, конфиг, детектор";
+}
+
+const showPulse = (on) => {
+  $("pulseSheet").classList.toggle("hid", !on);
+  if (on) renderPulse();
+};
+$("pulseBtn").onclick = () => showPulse(true);
+$("pulseClose").onclick = () => showPulse(false);
+$("pulseSheet").onclick = (e) => { if (e.target === $("pulseSheet")) showPulse(false); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") showPulse(false); });
 
 $("saveBtn").onclick = applyPending;
 $("discardBtn").onclick = discardPending;
 
-const VIEWS = { pulse:renderPulse, soul:renderSoul };
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
-  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
-  for (const v of Object.keys(VIEWS)) $(v).hidden = true;
-  $(b.dataset.v).hidden = false;
-  VIEWS[b.dataset.v]();
+/* ── синхронизация с реальным положением дел ──
+   Панель показывает не свою память, а то, что прямо сейчас в БД и файлах: конфиг
+   правится из другого места, файлы личности подхватываются на лету, бот
+   перезапускается. Поэтому канон перечитывается сам — при возврате на вкладку и
+   раз в минуту, пока смотришь. Черновик при этом не трогаем: несохранённые
+   правки важнее свежести, иначе синхрон стёр бы то, что ты набрал. */
+const SYNC_EVERY_MS = 60000;
+let syncAt = Date.now(), syncing = false, lastSig = null;
+
+/* loud — «показать, что идёт сверка»: контент под стекло, кольцо, потом свежий
+   экран. Так возвращаются на вкладку: пусть видно, что данные обновились.
+   quiet — фоновое биение: тихо тянем канон и трогаем экран ТОЛЬКО если он и
+   правда изменился. Иначе панель мигала бы блюром каждую минуту просто так. */
+async function sync(reason, loud = true) {
+  if (syncing || !token || isDirty() || document.hidden) return;
+  syncing = true;
+  try {
+    if (loud) setLoading(true, reason || "сверяю с ботом…");
+    const canon = await fetchCanon();
+    const sig = canonSig(canon);
+    if (loud || sig !== lastSig) {
+      if (!loud) setLoading(true, "личность изменилась — обновляю…");
+      applyCanon(canon);
+      if (!loud) await new Promise(r => setTimeout(r, 260));   // дать стеклу проявиться
+    }
+    lastSig = sig;
+    syncAt = Date.now();
+  } catch (_) {
+    // сеть моргнула — молча ждём следующего раза, экран не трогаем
+  } finally {
+    setLoading(false);
+    syncing = false;
+  }
+}
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) sync("сверяю с ботом…"); });
+window.addEventListener("focus", () => {
+  if (Date.now() - syncAt > 15000) sync("сверяю с ботом…");
 });
+setInterval(() => sync(null, false), SYNC_EVERY_MS);
 
 (async () => {
   if (!token) {
@@ -928,12 +1037,14 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
     return;
   }
   try {
-    await reload();
+    setLoading(true, "собираю личность…");
+    const canon = await fetchCanon();
+    applyCanon(canon);
+    lastSig = canonSig(canon);
   } catch (err) {
-    setLoading(false);
     $("sub").textContent = String(err.message).includes("403")
       ? "доступ только владельцу" : "не загрузилось: " + err.message;
-  }
+  } finally { setLoading(false); }
 })();
 </script>
 </body>

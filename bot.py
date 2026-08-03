@@ -1444,9 +1444,13 @@ async def cmd_panel(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """
     if update.effective_user.id != USER_ID:
         return
-    base = detect_webapp_url()
+    # Постоянный адрес, а не туннель. Домен cloudflared меняется при каждом
+    # перезапуске: старая ссылка умирает, а вместе с ней и вход — токен лежит в
+    # localStorage, привязанном к домену. Прод отдаёт ту же панель из той же БД,
+    # адрес не меняется никогда, ссылку можно положить в закладки.
+    base = MINIAPP_URL or detect_webapp_url()
     if not base:
-        await update.message.reply_text("нет публичного адреса: не поднят туннель на 127.0.0.1:8765")
+        await update.message.reply_text("нет публичного адреса ни в проде, ни в туннеле")
         return
     try:
         token = store.create_session(owner_uid())
@@ -1454,8 +1458,12 @@ async def cmd_panel(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"не создал сессию: {e}")
         return
     url = f"{base.rstrip('/')}/admin.html#token={token}"
+    tunnel = detect_webapp_url()
+    extra = ("\n\nлокальная копия (живёт, пока поднят туннель):\n"
+             f"{tunnel.rstrip('/')}/admin.html#token={token}") if tunnel and tunnel != base else ""
     await update.message.reply_text(
-        "центр управления. открой один раз — дальше входить не нужно:\n\n" + url,
+        "центр управления. адрес постоянный — открой один раз и сохрани в закладки:\n\n"
+        + url + extra,
         disable_web_page_preview=True,
     )
 
